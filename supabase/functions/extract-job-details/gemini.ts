@@ -1,5 +1,20 @@
 import type { AIConfig } from "./index.ts";
 
+function stripAdditionalProperties(schema: any): any {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(stripAdditionalProperties);
+  const result: Record<string, any> = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "additionalProperties") continue;
+    if (typeof value === "object" && value !== null) {
+      result[key] = stripAdditionalProperties(value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 export async function callGemini(
   config: AIConfig,
   systemPrompt: string,
@@ -16,7 +31,7 @@ export async function callGemini(
         functionDeclarations: tools.map((t: any) => ({
           name: t.function.name,
           description: t.function.description,
-          parameters: t.function.parameters,
+          parameters: stripAdditionalProperties(t.function.parameters),
         })),
       },
     ];

@@ -13,6 +13,13 @@ const corsHeaders = {
 
 const FALLBACK_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
 
+const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
+  anthropic: "claude-sonnet-4-20250514",
+  gemini: "gemini-2.5-flash",
+  groq: "meta-llama/llama-4-scout-17b-16e-instruct",
+  ollama: "llama3",
+};
+
 export interface AIConfig {
   provider: "anthropic" | "gemini" | "groq" | "ollama";
   apiKey: string;
@@ -32,7 +39,7 @@ async function resolveAIProvider(supabase: any, userId: string): Promise<AIConfi
     return {
       provider: activeProvider.provider,
       apiKey: activeProvider.api_key || "",
-      model: activeProvider.model_name || "",
+      model: activeProvider.model_name || PROVIDER_DEFAULT_MODELS[activeProvider.provider] || "",
       baseUrl: activeProvider.base_url || undefined,
     };
   }

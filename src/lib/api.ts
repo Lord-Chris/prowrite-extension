@@ -14,9 +14,18 @@ export interface ExtractedJob {
   nice_to_have_skills?: string[];
 }
 
+export class AuthFetchError extends Error {
+  statusCode: number;
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = "AuthFetchError";
+    this.statusCode = statusCode;
+  }
+}
+
 async function authFetch(url: string, body: any) {
   const token = await getAccessToken();
-  if (!token) throw new Error("Not authenticated");
+  if (!token) throw new AuthFetchError("Not authenticated", 401);
 
   const resp = await fetch(url, {
     method: "POST",
@@ -35,7 +44,7 @@ async function authFetch(url: string, body: any) {
     } catch {
       msg = text || `Request failed (${resp.status})`;
     }
-    throw new Error(msg);
+    throw new AuthFetchError(msg, resp.status);
   }
 
   return resp.json();
@@ -86,7 +95,8 @@ export async function generateDocuments(jobId: string) {
   });
 
   if (data?.error === "subscription_required") {
-    throw new Error("subscription_required");
+    const err = new AuthFetchError("subscription_required", 402);
+    throw err;
   }
 
   return data;

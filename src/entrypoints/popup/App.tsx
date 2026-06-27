@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { getAccessToken } from "../../lib/auth";
-import { extractJobDetails, saveJob, generateDocuments } from "../../lib/api";
+import { getAccessToken, getUserDisplayName, getInitials } from "../../lib/auth";
+import { extractJobDetails, saveJob, generateDocuments, AuthFetchError } from "../../lib/api";
 import type { ExtractedJob } from "../../lib/api";
 import Logo from "../../components/Logo";
 
@@ -16,12 +16,13 @@ type State =
   | {
       phase: "done";
       contentSnapshot?: any;
+      stylingSnapshot?: any;
       coverLetter?: string;
       jobUrl?: string;
       title?: string;
       company?: string;
     }
-  | { phase: "error"; message: string };
+  | { phase: "error"; message: string; statusCode?: number; retry?: () => void };
 
 async function getPageContent(): Promise<{ url: string; text: string }> {
   const stored = await chrome.storage.local.get<{
@@ -110,90 +111,161 @@ function escapeHtml(text: unknown): string {
     .replace(/"/g, "&quot;");
 }
 
-function renderResumeHTML(snapshot: any): string {
+function renderResumeHTML(snapshot: any, styling?: any): string {
   if (!snapshot) return "";
 
-  const c = snapshot;
-  const parts: string[] = [`<div style="font-family:Georgia,serif;max-width:700px;margin:0 auto;padding:40px;color:#1a1a1a;font-size:11pt;line-height:1.5;">`];
+  const s = styling || {};
+  const fontFamily = s.fontFamily || "Georgia";
+  const fontSize = s.fontSize || 11;
+  const headingFontFamily = s.headingFontFamily || "Georgia";
+  const headingFontSize = s.headingFontSize || 14;
+  const headingFontWeight = s.headingFontWeight || "bold";
+  const lineHeight = s.lineHeight || 1.5;
+  const sectionSpacing = s.sectionSpacing || 12;
+  const bulletSpacing = s.bulletSpacing || 4;
+  const marginTop = s.marginTop ?? 40;
+  const marginBottom = s.marginBottom ?? 40;
+  const marginLeft = s.marginLeft ?? 50;
+  const marginRight = s.marginRight ?? 50;
+  const alignment = s.alignment || "left";
 
-  if (c.contactInfo?.full_name) {
-    parts.push(`<div style="text-align:center;margin-bottom:16px;">`);
-    parts.push(`<h1 style="font-size:20pt;margin:0;font-weight:700;">${escapeHtml(c.contactInfo.full_name)}</h1>`);
-    if (c.profile?.preferred_title) {
-      parts.push(`<p style="margin:4px 0 0;font-size:12pt;">${escapeHtml(c.profile.preferred_title)}</p>`);
+  const sectionMap: Record<string, { sort_order: number; is_visible: boolean }> = {};
+  if (snapshot.sectionOrder) {
+    for (const so of snapshot.sectionOrder) {
+      sectionMap[so.section_type] = so;
+    }
+  }
+
+  function isVisible(type: string): boolean {
+    if (!snapshot.sectionOrder) return true;
+    return sectionMap[type]?.is_visible ?? true;
+  }
+
+  const textAlign = alignment === "center" ? "center" : alignment === "right" ? "right" : "left";
+
+  const parts: string[] = [];
+
+  parts.push(`<div style="font-family:${fontFamily},serif;max-width:700px;margin:0 auto;padding:${marginTop}px ${marginRight}px ${marginBottom}px ${marginLeft}px;color:#1a1a1a;font-size:${fontSize}pt;line-height:${lineHeight};">`);
+
+  if (isVisible("contact_info") && snapshot.contactInfo?.full_name) {
+    parts.push(`<div style="text-align:${textAlign};margin-bottom:${sectionSpacing}px;">`);
+    parts.push(`<h1 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize + 6}pt;margin:0;font-weight:${headingFontWeight === "bold" ? 700 : headingFontWeight};">${escapeHtml(snapshot.contactInfo.full_name)}</h1>`);
+    if (isVisible("preferred_title") && snapshot.profile?.preferred_title) {
+      parts.push(`<p style="margin:4px 0 0;font-size:${fontSize + 1}pt;">${escapeHtml(snapshot.profile.preferred_title)}</p>`);
     }
     const details = [
-      c.contactInfo.email,
-      c.contactInfo.phone,
-      c.contactInfo.location,
+      snapshot.contactInfo.email,
+      snapshot.contactInfo.phone,
+      snapshot.contactInfo.location,
     ].filter(Boolean).map(escapeHtml);
     if (details.length) {
-      parts.push(`<p style="margin:4px 0 0;font-size:10pt;color:#555;">${details.join(" &nbsp;|&nbsp; ")}</p>`);
+      parts.push(`<p style="margin:4px 0 0;font-size:${fontSize - 1}pt;color:#555;">${details.join(" &nbsp;|&nbsp; ")}</p>`);
     }
     parts.push(`</div>`);
   }
 
-  if (c.professionalSummary) {
-    parts.push(`<h2 style="font-size:11pt;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:16px 0 8px;">Summary</h2>`);
-    parts.push(`<p style="margin:0 0 12px;">${escapeHtml(c.professionalSummary)}</p>`);
-  }
-
-  if (c.skills?.length) {
-    parts.push(`<h2 style="font-size:11pt;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:16px 0 8px;">Skills</h2>`);
-    for (const cat of ["proficient", "familiar", "tools"]) {
-      const items = c.skills.filter((s: any) => s.category === cat);
-      if (!items.length) continue;
-      const label = cat === "proficient" ? "Proficient" : cat === "familiar" ? "Familiar" : "Tools";
-      parts.push(`<p style="margin:0 0 4px;"><strong>${label}:</strong> ${items.map((s: any) => escapeHtml(s.name)).join(", ")}</p>`);
-    }
-  }
-
-  if (c.workExperiences?.length) {
-    parts.push(`<h2 style="font-size:11pt;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:16px 0 8px;">Experience</h2>`);
-    for (const w of c.workExperiences) {
-      const dates = [w.start_date, w.end_date || (w.is_current ? "Present" : "")].filter(Boolean).join(" — ");
-      parts.push(`<div style="margin-bottom:8px;">`);
-      parts.push(`<p style="margin:0;font-weight:600;">${escapeHtml(w.role)} at ${escapeHtml(w.company)}</p>`);
-      if (dates) parts.push(`<p style="margin:0;font-size:10pt;color:#555;">${escapeHtml(dates)}</p>`);
-      if (w.bullets?.length) {
-        parts.push(`<ul style="margin:4px 0 0;padding-left:18px;">`);
-        for (const b of w.bullets) {
-          parts.push(`<li style="margin-bottom:2px;">${escapeHtml(b.content)}</li>`);
+  const sectionRenderers: { type: string; render: () => void }[] = [
+    {
+      type: "professional_summary",
+      render: () => {
+        if (!snapshot.professionalSummary) return;
+        const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
+        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Summary</h2>`);
+        parts.push(`<p style="margin:0 0 ${sectionSpacing}px;">${escapeHtml(snapshot.professionalSummary)}</p>`);
+      },
+    },
+    {
+      type: "skills",
+      render: () => {
+        if (!snapshot.skills?.length) return;
+        const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
+        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Skills</h2>`);
+        for (const cat of ["proficient", "familiar", "tools"]) {
+          const items = snapshot.skills.filter((s: any) => s.category === cat);
+          if (!items.length) continue;
+          const label = cat === "proficient" ? "Proficient" : cat === "familiar" ? "Familiar" : "Tools";
+          parts.push(`<p style="margin:0 0 4px;"><strong>${label}:</strong> ${items.map((s: any) => escapeHtml(s.name)).join(", ")}</p>`);
         }
-        parts.push(`</ul>`);
-      }
-      parts.push(`</div>`);
-    }
-  }
+      },
+    },
+    {
+      type: "work_experience",
+      render: () => {
+        if (!snapshot.workExperiences?.length) return;
+        const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
+        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Experience</h2>`);
+        for (const w of snapshot.workExperiences) {
+          const dates = [w.start_date, w.end_date || (w.is_current ? "Present" : "")].filter(Boolean).join(" — ");
+          parts.push(`<div style="margin-bottom:${bulletSpacing}px;">`);
+          parts.push(`<p style="margin:0;font-weight:600;">${escapeHtml(w.role)} at ${escapeHtml(w.company)}</p>`);
+          if (dates) parts.push(`<p style="margin:0;font-size:10pt;color:#555;">${escapeHtml(dates)}</p>`);
+          if (w.bullets?.length) {
+            parts.push(`<ul style="margin:${bulletSpacing}px 0 0;padding-left:18px;">`);
+            for (const b of w.bullets) {
+              parts.push(`<li style="margin-bottom:2px;">${escapeHtml(b.content)}</li>`);
+            }
+            parts.push(`</ul>`);
+          }
+          parts.push(`</div>`);
+        }
+      },
+    },
+    {
+      type: "education",
+      render: () => {
+        if (!snapshot.education?.length) return;
+        const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
+        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Education</h2>`);
+        for (const e of snapshot.education) {
+          const dates = [e.start_date, e.end_date || (e.is_current ? "Present" : "")].filter(Boolean).join(" — ");
+          parts.push(`<p style="margin:0 0 4px;"><strong>${escapeHtml(e.school)}</strong>`);
+          if (e.degree) parts.push(` — ${escapeHtml(e.degree)}`);
+          if (e.field_of_study) parts.push(` in ${escapeHtml(e.field_of_study)}`);
+          if (dates) parts.push(`<br/><span style="color:#555;">${escapeHtml(dates)}</span>`);
+          parts.push(`</p>`);
+        }
+      },
+    },
+    {
+      type: "projects",
+      render: () => {
+        if (!snapshot.projects?.length) return;
+        const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
+        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Projects</h2>`);
+        for (const p of snapshot.projects) {
+          parts.push(`<p style="margin:0 0 2px;"><strong>${escapeHtml(p.name)}</strong>`);
+          if (p.description) parts.push(` — ${escapeHtml(p.description)}`);
+          parts.push(`</p>`);
+        }
+      },
+    },
+    {
+      type: "certifications",
+      render: () => {
+        if (!snapshot.certifications?.length) return;
+        const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
+        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Certifications</h2>`);
+        for (const cert of snapshot.certifications) {
+          parts.push(`<p style="margin:0 0 2px;"><strong>${escapeHtml(cert.name)}</strong>`);
+          if (cert.issuer) parts.push(` — ${escapeHtml(cert.issuer)}`);
+          parts.push(`</p>`);
+        }
+      },
+    },
+  ];
 
-  if (c.education?.length) {
-    parts.push(`<h2 style="font-size:11pt;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:16px 0 8px;">Education</h2>`);
-    for (const e of c.education) {
-      const dates = [e.start_date, e.end_date || (e.is_current ? "Present" : "")].filter(Boolean).join(" — ");
-      parts.push(`<p style="margin:0 0 4px;"><strong>${escapeHtml(e.school)}</strong>`);
-      if (e.degree) parts.push(` — ${escapeHtml(e.degree)}`);
-      if (e.field_of_study) parts.push(` in ${escapeHtml(e.field_of_study)}`);
-      if (dates) parts.push(`<br/><span style="color:#555;">${escapeHtml(dates)}</span>`);
-      parts.push(`</p>`);
-    }
-  }
+  const defaultOrder = sectionRenderers.map(r => r.type);
+  const orderedTypes = snapshot.sectionOrder
+    ? [...snapshot.sectionOrder]
+        .filter((so: any) => so.is_visible !== false)
+        .sort((a: any, b: any) => a.sort_order - b.sort_order)
+        .map((so: any) => so.section_type)
+    : defaultOrder;
 
-  if (c.projects?.length) {
-    parts.push(`<h2 style="font-size:11pt;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:16px 0 8px;">Projects</h2>`);
-    for (const p of c.projects) {
-      parts.push(`<p style="margin:0 0 2px;"><strong>${escapeHtml(p.name)}</strong>`);
-      if (p.description) parts.push(` — ${escapeHtml(p.description)}`);
-      parts.push(`</p>`);
-    }
-  }
-
-  if (c.certifications?.length) {
-    parts.push(`<h2 style="font-size:11pt;text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:16px 0 8px;">Certifications</h2>`);
-    for (const cert of c.certifications) {
-      parts.push(`<p style="margin:0 0 2px;"><strong>${escapeHtml(cert.name)}</strong>`);
-      if (cert.issuer) parts.push(` — ${escapeHtml(cert.issuer)}`);
-      parts.push(`</p>`);
-    }
+  for (const type of orderedTypes) {
+    if (type === "contact_info" || type === "preferred_title") continue;
+    const renderer = sectionRenderers.find(r => r.type === type);
+    if (renderer) renderer.render();
   }
 
   parts.push(`</div>`);
@@ -208,75 +280,111 @@ function openPrintWindow(title: string, htmlContent: string) {
   setTimeout(() => win.print(), 300);
 }
 
-function formatCoverLetterHTML(text: string): string {
-  return `<div style="font-family:Georgia,serif;max-width:650px;margin:0 auto;padding:40px;color:#1a1a1a;font-size:11pt;line-height:1.6;white-space:pre-wrap;">${escapeHtml(text).replace(/\n/g, "<br/>")}</div>`;
+function formatCoverLetterHTML(text: string, styling?: any): string {
+  const s = styling || {};
+  const fontFamily = s.fontFamily || "Georgia";
+  const fontSize = s.fontSize || 11;
+  const lineHeight = s.lineHeight || 1.6;
+  return `<div style="font-family:${fontFamily},serif;max-width:650px;margin:0 auto;padding:40px;color:#1a1a1a;font-size:${fontSize}pt;line-height:${lineHeight};white-space:pre-wrap;">${escapeHtml(text).replace(/\n/g, "<br/>")}</div>`;
 }
 
 export default function App() {
   const [state, setState] = useState<State>({ phase: "checking-auth" });
+  const [profileName, setProfileName] = useState<string | null>(null);
   const [coverLetterExpanded, setCoverLetterExpanded] = useState(false);
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    const runExtract = async (url: string, text: string) => {
+      if (cancelled) return;
+      setState({ phase: "extracting" });
+      try {
+        const job = await extractJobDetails(url, text);
+        if (!cancelled) setState({ phase: "preview", job, pageUrl: url });
+      } catch (e: any) {
+        if (!cancelled) {
+          const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
+          const msg = e.message || "Failed to extract job details";
+          const isRetryable = !statusCode || statusCode >= 500;
+          setState({ phase: "error", message: msg, statusCode, retry: isRetryable ? () => runExtract(url, text) : undefined });
+        }
+      }
+    };
+
+    const run = async () => {
       const token = await getAccessToken();
       if (!token) {
-        setState({ phase: "no-auth" });
+        if (!cancelled) setState({ phase: "no-auth" });
         return;
       }
 
-      setState({ phase: "checking-page" });
+      getUserDisplayName().then(name => {
+        if (name && !cancelled) setProfileName(name);
+      });
+
+      if (!cancelled) setState({ phase: "checking-page" });
 
       try {
         const { url, text } = await getPageContent();
 
         if (!isJobPage(url, text)) {
-          setState({ phase: "not-job-page", url, text });
+          if (!cancelled) setState({ phase: "not-job-page", url, text });
           return;
         }
 
-        setState({ phase: "extracting" });
-
-        const job = await extractJobDetails(url, text);
-        setState({ phase: "preview", job, pageUrl: url });
+        await runExtract(url, text);
       } catch (e: any) {
-        setState({ phase: "error", message: e.message || "Failed to extract job details" });
+        if (!cancelled) {
+          const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
+          const msg = e.message || "Failed to extract job details";
+          setState({ phase: "error", message: msg, statusCode });
+        }
       }
-    })();
+    };
+
+    run();
+
+    return () => { cancelled = true; };
   }, []);
 
-  const handleForceExtract = async () => {
-    if (state.phase !== "not-job-page") return;
+  const runForceExtract = async (url: string, text: string) => {
     setState({ phase: "extracting" });
     try {
-      const job = await extractJobDetails(state.url, state.text);
-      setState({ phase: "preview", job, pageUrl: state.url });
+      const job = await extractJobDetails(url, text);
+      setState({ phase: "preview", job, pageUrl: url });
     } catch (e: any) {
-      setState({ phase: "error", message: e.message || "Failed to extract job details" });
+      const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
+      const msg = e.message || "Failed to extract job details";
+      const isRetryable = !statusCode || statusCode >= 500;
+      setState({ phase: "error", message: msg, statusCode, retry: isRetryable ? () => runForceExtract(url, text) : undefined });
     }
   };
 
-  const handleSaveAndGenerate = async () => {
-    if (state.phase !== "preview") return;
+  const handleForceExtract = () => {
+    if (state.phase !== "not-job-page") return;
+    runForceExtract(state.url, state.text);
+  };
 
+  const runSaveAndGenerate = async (job: ExtractedJob, pageUrl: string) => {
     setState({ phase: "saving" });
-
     try {
       const descParts = [
-        `Key Responsibilities: ${state.job.key_responsibilities.join(", ")}`,
-        `Required Skills: ${state.job.required_skills.join(", ")}`,
-        `Years of Experience Required: ${state.job.years_of_experience_required}`,
+        `Key Responsibilities: ${job.key_responsibilities.join(", ")}`,
+        `Required Skills: ${job.required_skills.join(", ")}`,
+        `Years of Experience Required: ${job.years_of_experience_required}`,
       ];
-      if (state.job.company_description) {
-        descParts.push(`Company Description: ${state.job.company_description}`);
+      if (job.company_description) {
+        descParts.push(`Company Description: ${job.company_description}`);
       }
-      if (state.job.nice_to_have_skills?.length) {
-        descParts.push(`Nice-to-Have Skills: ${state.job.nice_to_have_skills.join(", ")}`);
+      if (job.nice_to_have_skills?.length) {
+        descParts.push(`Nice-to-Have Skills: ${job.nice_to_have_skills.join(", ")}`);
       }
 
       const jobId = await saveJob({
-        title: state.job.job_title,
-        company: state.job.company,
-        job_link: state.pageUrl,
+        title: job.job_title,
+        company: job.company,
+        job_link: pageUrl,
         job_description: descParts.join("\n\n"),
         status: "draft",
       });
@@ -288,29 +396,38 @@ export default function App() {
       setState({
         phase: "done",
         contentSnapshot: docs?.cv?.contentSnapshot ?? null,
+        stylingSnapshot: docs?.cv?.stylingSnapshot ?? null,
         coverLetter: docs?.coverLetter,
         jobUrl: jobId,
-        title: state.job.job_title,
-        company: state.job.company,
+        title: job.job_title,
+        company: job.company,
       });
     } catch (e: any) {
       if (e.message === "subscription_required") {
         setState({ phase: "error", message: "Your trial has ended. Subscribe to generate documents." });
       } else {
-        setState({ phase: "error", message: e.message || "Something went wrong" });
+        const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
+        const msg = e.message || "Something went wrong";
+        const isRetryable = !statusCode || statusCode >= 500;
+        setState({ phase: "error", message: msg, statusCode, retry: isRetryable ? () => runSaveAndGenerate(job, pageUrl) : undefined });
       }
     }
   };
 
+  const handleSaveAndGenerate = () => {
+    if (state.phase !== "preview") return;
+    runSaveAndGenerate(state.job, state.pageUrl);
+  };
+
   const openResumePrint = () => {
     if (state.phase !== "done" || !state.contentSnapshot) return;
-    const html = renderResumeHTML(state.contentSnapshot);
+    const html = renderResumeHTML(state.contentSnapshot, state.stylingSnapshot);
     openPrintWindow(`Resume - ${state.title} at ${state.company}`, html);
   };
 
   const openCoverLetterPrint = () => {
     if (state.phase !== "done" || !state.coverLetter) return;
-    const html = formatCoverLetterHTML(state.coverLetter);
+    const html = formatCoverLetterHTML(state.coverLetter, state.stylingSnapshot);
     openPrintWindow(`Cover Letter - ${state.title} at ${state.company}`, html);
   };
 
@@ -333,6 +450,14 @@ export default function App() {
       <header className="header">
         <Logo className="header-logo" />
         <h1>ProWrite</h1>
+        {profileName && (
+          <div className="header-right">
+            <div className="profile-badge">
+              <div className="profile-avatar">{getInitials(profileName)}</div>
+              <span className="profile-name">{profileName}</span>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="main">
@@ -478,11 +603,24 @@ export default function App() {
         {state.phase === "error" && (
           <div className="center">
             <p className="icon">⚠️</p>
+            {state.statusCode && state.statusCode >= 500 && (
+              <div className="error-badge error-badge-5xx">Server Error</div>
+            )}
+            {state.statusCode && state.statusCode >= 400 && state.statusCode < 500 && state.statusCode !== 402 && (
+              <div className="error-badge error-badge-4xx">Client Error</div>
+            )}
             <p className="title">Something went wrong</p>
             <p className="desc">{state.message}</p>
-            <button className="btn btn-primary full" onClick={() => window.close()}>
-              Close
-            </button>
+            {state.retry ? (
+              <div className="btn-group" style={{ marginTop: 4 }}>
+                <button className="btn btn-danger" onClick={state.retry}>Retry</button>
+                <button className="btn btn-secondary" onClick={() => window.close()}>Close</button>
+              </div>
+            ) : (
+              <button className="btn btn-primary full" onClick={() => window.close()}>
+                Close
+              </button>
+            )}
           </div>
         )}
       </main>

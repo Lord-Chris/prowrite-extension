@@ -72,6 +72,44 @@ body {
   color: hsl(var(--foreground));
 }
 
+.header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.profile-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.profile-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Layout ── */
 
 .main {
@@ -110,6 +148,31 @@ body {
   max-width: 100%;
   line-height: 1.5;
   word-wrap: break-word;
+}
+
+/* ── Error ── */
+
+.error-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.error-badge-5xx {
+  background: hsl(0 84% 60% / 0.15);
+  color: hsl(0 84% 60%);
+}
+
+.error-badge-4xx {
+  background: hsl(38 92% 50% / 0.15);
+  color: hsl(38 92% 50%);
 }
 
 /* ── Spinner ── */
@@ -177,6 +240,16 @@ body {
 
 .btn-secondary:hover {
   background: hsl(var(--accent));
+}
+
+.btn-danger {
+  background: hsl(0 84% 60% / 0.15);
+  color: hsl(0 84% 60%);
+  border: 1px solid hsl(0 84% 60% / 0.3);
+}
+
+.btn-danger:hover {
+  background: hsl(0 84% 60% / 0.25);
 }
 
 .full {

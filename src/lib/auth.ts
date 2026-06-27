@@ -72,4 +72,47 @@ export async function isAuthenticated(): Promise<boolean> {
   return token !== null;
 }
 
+export function getInitials(name: string): string {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
+
+export async function getUserDisplayName(): Promise<string | null> {
+  try {
+    const result = await chrome.storage.local.get(STORAGE_KEY);
+    const raw = result[STORAGE_KEY];
+    if (!raw) return null;
+
+    const session = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const supabase = getClient();
+    await supabase.auth.setSession(session);
+
+    const { data: authData } = await supabase.auth.getUser();
+    const metaName = authData?.user?.user_metadata?.full_name;
+    if (metaName && typeof metaName === "string" && metaName.trim()) {
+      return metaName.trim();
+    }
+
+    const uid = authData?.user?.id;
+    if (uid) {
+      const { data: contact } = await supabase
+        .from("contact_info")
+        .select("full_name")
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      if (contact?.full_name?.trim()) {
+        return contact.full_name.trim();
+      }
+    }
+
+    return null;
+  } catch (e) {
+    console.error("getUserDisplayName error:", e);
+    return null;
+  }
+}
+
 export { getClient as getSupabaseClient };

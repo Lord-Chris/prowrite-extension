@@ -4,20 +4,16 @@ import { callOllama } from "./ollama.ts";
 import { callClaude } from "./claude.ts";
 import { callGemini } from "./gemini.ts";
 import { callGroq } from "./groq.ts";
+import {
+  FALLBACK_AI_PROVIDER,
+  FALLBACK_AI_MODEL,
+  PROVIDER_DEFAULT_MODELS,
+} from "../_shared/ai-constants.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
-const FALLBACK_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct";
-
-const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
-  anthropic: "claude-sonnet-4-20250514",
-  gemini: "gemini-2.5-flash",
-  groq: "meta-llama/llama-4-scout-17b-16e-instruct",
-  ollama: "llama3",
 };
 
 export interface AIConfig {
@@ -54,7 +50,7 @@ async function resolveAIProvider(supabase: any, userId: string): Promise<AIConfi
   const FALLBACK_AI_API_KEY = Deno.env.get("FALLBACK_AI_API_KEY");
 
   if (fallbackAiEnabled && FALLBACK_AI_API_KEY) {
-    return { provider: "groq", apiKey: FALLBACK_AI_API_KEY, model: FALLBACK_MODEL };
+    return { provider: FALLBACK_AI_PROVIDER, apiKey: FALLBACK_AI_API_KEY, model: FALLBACK_AI_MODEL };
   }
 
   throw new Error("No AI provider configured. Please add an AI provider in Settings > Integrations.");

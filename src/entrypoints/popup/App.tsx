@@ -1,5 +1,8 @@
-import { useState, useEffect } from "react";
-import { Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle } from "docx";
+import React, { useState, useEffect, createElement } from "react";
+import { Document as PdfDocument, Page, View, Text } from "@react-pdf/renderer";
+import { pdf } from "@react-pdf/renderer";
+import { Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, TabStopType } from "docx";
+import { format } from "date-fns";
 import { getAccessToken, getUserDisplayName, getInitials } from "../../lib/auth";
 import { extractJobDetails, saveJob, generateDocuments, AuthFetchError } from "../../lib/api";
 import type { ExtractedJob } from "../../lib/api";
@@ -160,7 +163,7 @@ function renderResumeHTML(snapshot: any, styling?: any): string {
       snapshot.contactInfo.location,
     ].filter(Boolean).map(escapeHtml);
     if (details.length) {
-      parts.push(`<p style="margin:4px 0 0;font-size:${fontSize - 1}px;color:#555;">${details.join(" &nbsp;|&nbsp; ")}</p>`);
+      parts.push(`<p style="margin:4px 0 0;font-size:${fontSize - 1}px;color:#555;">${details.join(" • ")}</p>`);
     }
     parts.push(`</div>`);
   }
@@ -190,43 +193,42 @@ function renderResumeHTML(snapshot: any, styling?: any): string {
       },
     },
     {
-      type: "work_experience",
-      render: () => {
-        if (!snapshot.workExperiences?.length) return;
-        const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
-        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}px;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Experience</h2>`);
-        for (const w of snapshot.workExperiences) {
-          const dates = [w.start_date, w.end_date || (w.is_current ? "Present" : "")].filter(Boolean).join(" — ");
-          parts.push(`<div style="margin-bottom:${bulletSpacing}px;">`);
-          parts.push(`<p style="margin:0;font-weight:600;">${escapeHtml(w.role)} at ${escapeHtml(w.company)}</p>`);
-          if (dates) parts.push(`<p style="margin:0;font-size:${fontSize - 1}px;color:#555;">${escapeHtml(dates)}</p>`);
-          if (w.bullets?.length) {
-            parts.push(`<ul style="margin:${bulletSpacing}px 0 0;padding-left:18px;">`);
-            for (const b of w.bullets) {
-              parts.push(`<li style="margin-bottom:2px;">${escapeHtml(b.content)}</li>`);
-            }
-            parts.push(`</ul>`);
-          }
-          parts.push(`</div>`);
-        }
-      },
+       type: "work_experience",
+       render: () => {
+         if (!snapshot.workExperiences?.length) return;
+         const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
+         parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}px;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Experience</h2>`);
+         for (const w of snapshot.workExperiences) {
+           const dates = `${w.start_date ? new Date(w.start_date).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""} – ${w.is_current ? "Present" : w.end_date ? new Date(w.end_date).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""}`.replace(/^ – /, "").replace(/ – $/, "");
+           parts.push(`<div style="margin-bottom:${bulletSpacing}px;">`);
+           parts.push(`<div style="display:flex;justify-content:space-between;"><p style="margin:0;font-weight:600;">${escapeHtml(w.role)}</p><p style="margin:0;font-size:${fontSize - 1}px;color:#555;">${escapeHtml(dates)}</p></div>`);
+           parts.push(`<p style="margin:0;font-style:italic;">${escapeHtml(w.company)}</p>`);
+           if (w.bullets?.length) {
+             parts.push(`<ul style="margin:${bulletSpacing}px 0 0;padding-left:0;list-style-type:disc;list-style-position:outside;margin-left:16px;">`);
+             for (const b of w.bullets) {
+               parts.push(`<li style="margin-bottom:${bulletSpacing / 2}px;">${escapeHtml(b.content)}</li>`);
+             }
+             parts.push(`</ul>`);
+           }
+           parts.push(`</div>`);
+         }
+       },
     },
-    {
-      type: "education",
-      render: () => {
-        if (!snapshot.education?.length) return;
-        const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
-        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}px;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Education</h2>`);
-        for (const e of snapshot.education) {
-          const dates = [e.start_date, e.end_date || (e.is_current ? "Present" : "")].filter(Boolean).join(" — ");
-          parts.push(`<p style="margin:0 0 4px;"><strong>${escapeHtml(e.school)}</strong>`);
-          if (e.degree) parts.push(` — ${escapeHtml(e.degree)}`);
-          if (e.field_of_study) parts.push(` in ${escapeHtml(e.field_of_study)}`);
-          if (dates) parts.push(`<br/><span style="color:#555;">${escapeHtml(dates)}</span>`);
-          parts.push(`</p>`);
-        }
-      },
-    },
+     {
+       type: "education",
+       render: () => {
+         if (!snapshot.education?.length) return;
+         const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
+         parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}px;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Education</h2>`);
+         for (const e of snapshot.education) {
+           const dateStr = `${e.start_date ? new Date(e.start_date).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""}${e.end_date ? ` – ${new Date(e.end_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}` : e.is_current ? " – Present" : ""}`.trim();
+           parts.push(`<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><div><p style="margin:0 0 4px;"><strong>${escapeHtml(e.school)}</strong>`);
+           if (e.degree) parts.push(` — ${escapeHtml(e.degree)}`);
+           if (e.field_of_study) parts.push(` in ${escapeHtml(e.field_of_study)}`);
+           parts.push(`</p></div><p style="margin:0;font-size:${fontSize - 1}px;color:#555;white-space:nowrap;margin-left:8px;">${escapeHtml(dateStr)}</p></div>`);
+         }
+       },
+     },
     {
       type: "projects",
       render: () => {
@@ -273,6 +275,34 @@ function renderResumeHTML(snapshot: any, styling?: any): string {
   return parts.join("\n");
 }
 
+// Export resume as PDF blob using react-pdf
+async function exportResumePdf(snapshot: any, styling?: any): Promise<Blob> {
+  try {
+    const blob = await pdf(
+      createElement(ResumePdfDocument, { data: snapshot, styling: styling || {} })
+    ).toBlob();
+    return blob;
+  } catch (err) {
+    console.error("PDF export failed:", err);
+    throw err;
+  }
+}
+
+// Download resume PDF directly
+async function downloadResumePdf(filename: string, snapshot: any, styling?: any) {
+  try {
+    const blob = await exportResumePdf(snapshot, styling);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Error downloading PDF:", err);
+  }
+}
+
 function openPrintWindow(title: string, htmlContent: string) {
   const iframe = document.createElement("iframe");
   iframe.style.cssText = "position:fixed;left:-99999px;top:0;width:0;height:0;border:none;visibility:hidden;";
@@ -302,6 +332,19 @@ const pxToTwip = (px: number) => Math.round(px * 15.12);
 // px → half-points (docx font size unit; 1px ≈ 0.75pt; 1pt = 2 half-pts)
 const pxToHalfPt = (px: number) => Math.round(px * 1.5);
 
+// Page size constants (in twips)
+// LETTER: 8.5in × 11in (12240 × 15840 twips)
+// A4: 210mm × 297mm (11906 × 16838 twips)
+const PAGE_WIDTHS = {
+  LETTER: 12240,
+  A4: 11906,
+} as const;
+
+const PAGE_HEIGHTS = {
+  LETTER: 15840,
+  A4: 16838,
+} as const;
+
 function getDocxAlignment(a: string): typeof AlignmentType[keyof typeof AlignmentType] {
   if (a === "center") return AlignmentType.CENTER;
   if (a === "right") return AlignmentType.RIGHT;
@@ -309,7 +352,250 @@ function getDocxAlignment(a: string): typeof AlignmentType[keyof typeof Alignmen
   return AlignmentType.LEFT;
 }
 
-async function buildResumeDocx(snapshot: any, styling?: any): Promise<Blob> {
+// PDF Document Component (matches prowrite-lovable)
+function ResumePdfDocument({ data, styling }: any) {
+  const defaultStyling = {
+    fontFamily: "Times-Roman",
+    fontSize: 11,
+    headingFontFamily: "Times-Roman",
+    headingFontSize: 14,
+    headingFontWeight: "bold",
+    lineHeight: 1.4,
+    sectionSpacing: 12,
+    bulletSpacing: 4,
+    marginTop: 40,
+    marginBottom: 40,
+    marginLeft: 50,
+    marginRight: 50,
+    alignment: "left",
+  };
+  
+  const c = { ...defaultStyling, ...(styling || {}) };
+  const { contactInfo, profile, workExperiences, skills, education, projects, certifications, sectionOrder } = data;
+  
+  // Normalise professionalSummary (string) to summaries (array of objects) for consistency
+  const summaries = data.summaries
+    ?? (data.professionalSummary
+        ? [{ id: "summary", content: data.professionalSummary }]
+        : []);
+
+  // Compute visible sections based on sectionOrder or fallback to default
+  const visibleSections = sectionOrder?.length > 0
+    ? sectionOrder.filter((sec: any) => sec.is_visible).map((sec: any) => sec.section_type)
+    : ["contact_info", "preferred_title", "professional_summary", "skills", "work_experience", "projects", "certifications", "education"];
+
+  const fontFamily = c.fontFamily?.toLowerCase().includes("georgia") || c.fontFamily?.toLowerCase().includes("serif")
+    ? "Times-Roman"
+    : c.fontFamily?.toLowerCase().includes("arial") || c.fontFamily?.toLowerCase().includes("helvetica") || c.fontFamily?.toLowerCase().includes("sans")
+      ? "Helvetica"
+      : "Times-Roman";
+
+  const headingFontFamily = c.headingFontFamily?.toLowerCase().includes("georgia") || c.headingFontFamily?.toLowerCase().includes("serif")
+    ? "Times-Roman"
+    : c.headingFontFamily?.toLowerCase().includes("arial") || c.headingFontFamily?.toLowerCase().includes("helvetica") || c.headingFontFamily?.toLowerCase().includes("sans")
+      ? "Helvetica"
+      : "Times-Roman";
+
+  const headingStyle = {
+    fontFamily: headingFontFamily,
+    fontSize: c.headingFontSize || 14,
+    fontWeight: (c.headingFontWeight === "bold" ? "bold" : "normal") as const,
+    borderBottomWidth: 1,
+    borderBottomColor: "#333333",
+    paddingBottom: 2,
+    marginBottom: c.bulletSpacing || 4,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  };
+
+  const textAlign = (c.alignment === "center" ? "center" : c.alignment === "right" ? "right" : "left") as const;
+
+  const fmtDate = (d: string | null | undefined) => {
+    if (!d) return "";
+    try {
+      return format(new Date(d), "MMM yyyy");
+    } catch {
+      return d || "";
+    }
+  };
+
+  // Map section types to render functions
+  const sectionRenderers: Record<string, () => React.ReactNode> = {
+    contact_info: () => contactInfo?.full_name ? (
+      <View style={{ textAlign: "center", marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={{ fontSize: (c.headingFontSize || 14) + 4, fontWeight: "bold", fontFamily: headingFontFamily, lineHeight: 1, marginBottom: 0 }}>
+          {contactInfo.full_name}
+        </Text>
+        {profile?.preferred_title && (
+          <Text style={{ fontSize: (c.fontSize || 11) + 1, marginTop: 2, lineHeight: 1 }}>
+            {profile.preferred_title}
+          </Text>
+        )}
+        <View style={{ fontSize: c.fontSize - 1, marginTop: 4, display: "flex", flexDirection: "row", justifyContent: "center", flexWrap: "wrap" }}>
+          {(() => {
+            const fields = [contactInfo.email, contactInfo.phone, contactInfo.location, contactInfo.linkedin_url, contactInfo.github_url, contactInfo.portfolio_url].filter(Boolean);
+            return fields.map((item, idx) => (
+              <React.Fragment key={idx}>
+                <Text style={{ color: "#000000" }}>{item}</Text>
+                {idx < fields.length - 1 && (
+                  <Text style={{ paddingLeft: 6, paddingRight: 6 }}>•</Text>
+                )}
+              </React.Fragment>
+            ));
+          })()}
+        </View>
+      </View>
+    ) : null,
+
+    preferred_title: () => null,
+
+    professional_summary: () => summaries?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Summary</Text>
+        {summaries.map((s: any) => (
+          <Text key={s.id} style={{ marginBottom: c.bulletSpacing || 4, fontFamily }}>
+            {s.content}
+          </Text>
+        ))}
+      </View>
+    ) : null,
+
+    skills: () => skills?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Skills</Text>
+        {["proficient", "familiar", "tools"].map((cat) => {
+          const items = skills.filter((sk: any) => sk.category === cat);
+          if (items.length === 0) return null;
+          const label = cat === "proficient" ? "Proficient" : cat === "familiar" ? "Familiar" : "Tools";
+          return (
+            <Text key={cat} style={{ marginBottom: c.bulletSpacing || 4, fontFamily }}>
+              <Text style={{ fontWeight: "bold" }}>{label}:</Text> {items.map((sk: any) => sk.name).join(", ")}
+            </Text>
+          );
+        })}
+      </View>
+    ) : null,
+
+    work_experience: () => workExperiences?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Experience</Text>
+        {workExperiences.map((w: any) => (
+          <View key={w.id} style={{ marginBottom: (c.sectionSpacing || 12) - 4 }}>
+            <View style={{ display: "flex", flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontWeight: "bold", fontFamily }}>
+                {w.role}
+              </Text>
+              <Text style={{ fontSize: (c.fontSize || 11) - 1, fontFamily }}>
+                {fmtDate(w.start_date)} – {w.is_current ? "Present" : fmtDate(w.end_date)}
+              </Text>
+            </View>
+            <Text style={{ fontStyle: "italic", fontFamily }}>
+              {w.company}
+            </Text>
+            {w.bullets?.length > 0 && (
+              <View style={{ marginTop: c.bulletSpacing || 4 }}>
+                {w.bullets.map((b: any) => (
+                  <View key={b.id} style={{ display: "flex", flexDirection: "row", marginBottom: (c.bulletSpacing || 4) / 4, marginLeft: 4 }}>
+                    <Text style={{ fontFamily }}>•</Text>
+                    <Text style={{ fontFamily, marginLeft: 8 }}>
+                      {b.content}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        ))}
+      </View>
+    ) : null,
+
+    projects: () => projects?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Projects</Text>
+        {projects.map((p: any) => (
+          <View key={p.id} style={{ marginBottom: c.bulletSpacing || 4 }}>
+            <View style={{ display: "flex", flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontWeight: "bold", fontFamily }}>
+                {p.name}{p.url ? ` — ${p.url}` : ""}
+              </Text>
+              {(p.start_date || p.end_date) && (
+                <Text style={{ fontSize: c.fontSize - 1, fontFamily }}>
+                  {fmtDate(p.start_date)}{p.end_date ? ` – ${fmtDate(p.end_date)}` : ""}
+                </Text>
+              )}
+            </View>
+            {p.description && (
+              <Text style={{ marginTop: 2, fontFamily }}>
+                {p.description}
+              </Text>
+            )}
+          </View>
+        ))}
+      </View>
+    ) : null,
+
+    certifications: () => certifications?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Certifications</Text>
+        {certifications.map((cert: any) => (
+          <Text key={cert.id} style={{ marginBottom: c.bulletSpacing || 4, fontFamily }}>
+            <Text style={{ fontWeight: "bold" }}>{cert.name}</Text>
+            {cert.issuer ? ` — ${cert.issuer}` : ""}
+            {cert.issue_date ? ` (${fmtDate(cert.issue_date)})` : ""}
+          </Text>
+        ))}
+      </View>
+    ) : null,
+
+    education: () => education?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Education</Text>
+        {education.map((e: any) => (
+          <View key={e.id} style={{ marginBottom: c.bulletSpacing || 4 }}>
+            <View style={{ display: "flex", flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontWeight: "bold", fontFamily }}>
+                {e.school}
+              </Text>
+              <Text style={{ fontSize: (c.fontSize || 11) - 1, fontFamily }}>
+                {fmtDate(e.start_date)}{e.end_date ? ` – ${fmtDate(e.end_date)}` : e.is_current ? " – Present" : ""}
+              </Text>
+            </View>
+            {(e.degree || e.field_of_study) && (
+              <Text style={{ fontFamily }}>
+                {[e.degree, e.field_of_study].filter(Boolean).join(", ")}
+              </Text>
+            )}
+          </View>
+        ))}
+      </View>
+    ) : null,
+  };
+
+  return (
+    <PdfDocument>
+      <Page
+        size="LETTER"
+        style={{
+          paddingTop: c.marginTop || 40,
+          paddingBottom: c.marginBottom || 40,
+          paddingLeft: c.marginLeft || 50,
+          paddingRight: c.marginRight || 50,
+          fontFamily,
+          fontSize: c.fontSize || 11,
+          lineHeight: c.lineHeight || 1.4,
+          textAlign,
+        }}
+      >
+        {visibleSections.map((type: string) => {
+          const render = sectionRenderers[type];
+          return render ? <View key={type}>{render()}</View> : null;
+        })}
+      </Page>
+    </PdfDocument>
+  );
+}
+
+async function buildResumeDocx(snapshot: any, styling?: any, pageSize: "LETTER" | "A4" = "LETTER"): Promise<Blob> {
   const s = styling || {};
   const fontFamily = s.fontFamily || "Georgia";
   const fontSize = s.fontSize || 11;
@@ -324,6 +610,11 @@ async function buildResumeDocx(snapshot: any, styling?: any): Promise<Blob> {
   const marginLeft = s.marginLeft ?? 50;
   const marginRight = s.marginRight ?? 50;
   const alignment = s.alignment || "left";
+
+  // Compute page dimensions and text width for tab stop positioning
+  const pageWidthTwips = PAGE_WIDTHS[pageSize];
+  const pageHeightTwips = PAGE_HEIGHTS[pageSize];
+  const textWidthTwips = pageWidthTwips - pxToTwip(marginLeft) - pxToTwip(marginRight);
 
   const align = getDocxAlignment(alignment);
   const bodySize = pxToHalfPt(fontSize);
@@ -386,11 +677,16 @@ async function buildResumeDocx(snapshot: any, styling?: any): Promise<Blob> {
         children: [new TextRun({ text: snapshot.profile.preferred_title, font: fontFamily, size: pxToHalfPt(fontSize + 1) })],
       }));
     }
-    const details = [snapshot.contactInfo.email, snapshot.contactInfo.phone, snapshot.contactInfo.location, snapshot.contactInfo.linkedin_url].filter(Boolean) as string[];
+    const details = [snapshot.contactInfo.email, snapshot.contactInfo.phone, snapshot.contactInfo.location, snapshot.contactInfo.linkedin_url, snapshot.contactInfo.github_url, snapshot.contactInfo.portfolio_url].filter(Boolean) as string[];
     if (details.length) paragraphs.push(new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { after: sectionSpacingTwip },
-      children: [new TextRun({ text: details.join("  |  "), font: fontFamily, size: smallSize })],
+      children: details.flatMap((item, idx) => [
+        new TextRun({ text: item, font: fontFamily, size: smallSize }),
+        ...(idx < details.length - 1
+          ? [new TextRun({ text: "   •   ", font: fontFamily, size: smallSize })]
+          : []),
+      ]),
     }));
   }
 
@@ -424,22 +720,26 @@ async function buildResumeDocx(snapshot: any, styling?: any): Promise<Blob> {
       case "work_experience":
         if (snapshot.workExperiences?.length) {
           paragraphs.push(sectionHeading("Experience"));
-          for (const w of snapshot.workExperiences) {
-            const dateStr = `${fmtDate(w.start_date)} – ${w.is_current ? "Present" : fmtDate(w.end_date)}`;
-            paragraphs.push(new Paragraph({
-              alignment: AlignmentType.LEFT,
-              spacing: { after: pxToTwip(2) },
-              children: [
-                new TextRun({ text: w.role ?? "", font: fontFamily, size: bodySize, bold: true }),
-                new TextRun({ text: `\t${dateStr}`, font: fontFamily, size: smallSize }),
-              ],
-            }));
+           for (const w of snapshot.workExperiences) {
+             const dateStr = `${fmtDate(w.start_date)} – ${w.is_current ? "Present" : fmtDate(w.end_date)}`;
+             paragraphs.push(new Paragraph({
+               alignment: AlignmentType.LEFT,
+               spacing: { after: pxToTwip(2) },
+               tabStops: [{ type: TabStopType.RIGHT, position: textWidthTwips }],
+               children: [
+                 new TextRun({ text: w.role ?? "", font: fontFamily, size: bodySize, bold: true }),
+                 new TextRun({ text: `\t${dateStr}`, font: fontFamily, size: smallSize }),
+               ],
+             }));
             paragraphs.push(bodyPara(`${w.company ?? ""}`, { italic: true, spacingAfter: bulletSpacingTwip }));
             for (const b of w.bullets ?? []) paragraphs.push(new Paragraph({
               alignment: align,
-              bullet: { level: 0 },
               spacing: { after: pxToTwip(bulletSpacing / 2) },
-              children: [new TextRun({ text: b.content, font: fontFamily, size: bodySize })],
+              indent: { left: 181, hanging: 120 },
+              children: [
+                new TextRun({ text: "•\t", font: fontFamily, size: bodySize }),
+                new TextRun({ text: b.content, font: fontFamily, size: bodySize }),
+              ],
             }));
           }
         }
@@ -447,16 +747,17 @@ async function buildResumeDocx(snapshot: any, styling?: any): Promise<Blob> {
       case "education":
         if (snapshot.education?.length) {
           paragraphs.push(sectionHeading("Education"));
-          for (const e of snapshot.education) {
-            const dateStr = `${fmtDate(e.start_date)}${e.end_date ? ` – ${fmtDate(e.end_date)}` : e.is_current ? " – Present" : ""}`;
-            paragraphs.push(new Paragraph({
-              alignment: AlignmentType.LEFT,
-              spacing: { after: pxToTwip(2) },
-              children: [
-                new TextRun({ text: e.school ?? "", font: fontFamily, size: bodySize, bold: true }),
-                ...(dateStr ? [new TextRun({ text: `\t${dateStr}`, font: fontFamily, size: smallSize })] : []),
-              ],
-            }));
+           for (const e of snapshot.education) {
+             const dateStr = `${fmtDate(e.start_date)}${e.end_date ? ` – ${fmtDate(e.end_date)}` : e.is_current ? " – Present" : ""}`;
+             paragraphs.push(new Paragraph({
+               alignment: AlignmentType.LEFT,
+               spacing: { after: pxToTwip(2) },
+               tabStops: [{ type: TabStopType.RIGHT, position: textWidthTwips }],
+               children: [
+                 new TextRun({ text: e.school ?? "", font: fontFamily, size: bodySize, bold: true }),
+                 ...(dateStr ? [new TextRun({ text: `\t${dateStr}`, font: fontFamily, size: smallSize })] : []),
+               ],
+             }));
             const degreeField = [e.degree, e.field_of_study].filter(Boolean).join(", ");
             if (degreeField) paragraphs.push(bodyPara(degreeField, { spacingAfter: bulletSpacingTwip }));
           }
@@ -490,22 +791,23 @@ async function buildResumeDocx(snapshot: any, styling?: any): Promise<Blob> {
           }
         }
         break;
-    }
-  }
+     }
+   }
 
-  const doc = new Document({
-    sections: [{
-      properties: {
-        page: {
-          margin: { top: pxToTwip(marginTop), bottom: pxToTwip(marginBottom), left: pxToTwip(marginLeft), right: pxToTwip(marginRight) },
-        },
-      },
-      children: paragraphs,
-    }],
-  });
+   const doc = new Document({
+     sections: [{
+       properties: {
+         page: {
+           size: { width: pageWidthTwips, height: pageHeightTwips },
+           margin: { top: pxToTwip(marginTop), bottom: pxToTwip(marginBottom), left: pxToTwip(marginLeft), right: pxToTwip(marginRight) },
+         },
+       },
+       children: paragraphs,
+     }],
+   });
 
-  return Packer.toBlob(doc);
-}
+   return Packer.toBlob(doc);
+ }
 
 async function buildCoverLetterDocx(text: string, styling?: any): Promise<Blob> {
   const s = styling || {};
@@ -548,6 +850,7 @@ export default function App() {
   const [state, setState] = useState<State>({ phase: "checking-auth" });
   const [profileName, setProfileName] = useState<string | null>(null);
   const [coverLetterExpanded, setCoverLetterExpanded] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -675,16 +978,31 @@ export default function App() {
     runSaveAndGenerate(state.job, state.pageUrl);
   };
 
-  const openResumePrint = () => {
+  const downloadResumePdfFile = async () => {
     if (state.phase !== "done" || !state.contentSnapshot) return;
-    const html = renderResumeHTML(state.contentSnapshot, state.stylingSnapshot);
-    openPrintWindow(`Resume - ${state.title} at ${state.company}`, html);
+    setDownloadError(null);
+    try {
+      const filename = `CV_${(state.company ?? "").replace(/\s+/g, "_")}_${(state.title ?? "").replace(/\s+/g, "_")}.pdf`;
+      await downloadResumePdf(filename, state.contentSnapshot, state.stylingSnapshot);
+    } catch (err: any) {
+      const msg = err?.message || "Failed to download PDF. Please try again.";
+      setDownloadError(msg);
+      console.error("Resume PDF download error:", err);
+    }
   };
 
   const downloadResumeDocx = async () => {
     if (state.phase !== "done" || !state.contentSnapshot) return;
-    const blob = await buildResumeDocx(state.contentSnapshot, state.stylingSnapshot);
-    downloadBlob(blob, `Resume_${(state.title ?? "").replace(/\s+/g, "_")}_at_${(state.company ?? "").replace(/\s+/g, "_")}.docx`);
+    setDownloadError(null);
+    try {
+      const blob = await buildResumeDocx(state.contentSnapshot, state.stylingSnapshot);
+      const filename = `CV_${(state.company ?? "").replace(/\s+/g, "_")}_${(state.title ?? "").replace(/\s+/g, "_")}.docx`;
+      downloadBlob(blob, filename);
+    } catch (err: any) {
+      const msg = err?.message || "Failed to download Word document. Please try again.";
+      setDownloadError(msg);
+      console.error("Resume DOCX download error:", err);
+    }
   };
 
   const openCoverLetterPrint = () => {
@@ -814,27 +1132,58 @@ export default function App() {
           </div>
         )}
 
-        {state.phase === "done" && (
-          <div className="done">
-            <div className="done-header">
-              <p className="icon">✅</p>
-              <p className="title">{state.title} at {state.company}</p>
-              <p className="desc">Documents generated successfully</p>
-            </div>
+         {state.phase === "done" && (
+           <div className="done">
+             <div className="done-header">
+               <p className="icon">✅</p>
+               <p className="title">{state.title} at {state.company}</p>
+               <p className="desc">Documents generated successfully</p>
+             </div>
 
-            <div className="doc-section">
+             {downloadError && (
+               <div style={{
+                 backgroundColor: "#fee2e2",
+                 border: "1px solid #fecaca",
+                 borderRadius: "6px",
+                 padding: "12px",
+                 marginBottom: "16px",
+                 display: "flex",
+                 justifyContent: "space-between",
+                 alignItems: "center",
+               }}>
+                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                   <span style={{ fontSize: "16px" }}>⚠️</span>
+                   <p style={{ margin: 0, color: "#991b1b", fontSize: "13px" }}>{downloadError}</p>
+                 </div>
+                 <button
+                   onClick={() => setDownloadError(null)}
+                   style={{
+                     background: "none",
+                     border: "none",
+                     cursor: "pointer",
+                     color: "#991b1b",
+                     fontSize: "18px",
+                     padding: "0 4px",
+                   }}
+                 >
+                   ✕
+                 </button>
+               </div>
+             )}
+
+             <div className="doc-section">
               <div className="doc-section-header">
                 <span className="doc-icon">📄</span>
                 <span>CV / Resume</span>
               </div>
-              <div className="btn-group">
-                <button className="btn btn-secondary" onClick={openResumePrint}>
-                  PDF
-                </button>
-                <button className="btn btn-secondary" onClick={() => void downloadResumeDocx()}>
-                  Word
-                </button>
-              </div>
+               <div className="btn-group">
+                 <button className="btn btn-secondary" onClick={() => void downloadResumePdfFile()}>
+                   PDF
+                 </button>
+                 <button className="btn btn-secondary" onClick={() => void downloadResumeDocx()}>
+                   Word
+                 </button>
+               </div>
             </div>
 
             {state.coverLetter && (

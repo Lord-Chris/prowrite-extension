@@ -1,9 +1,30 @@
 import { defineConfig } from "wxt";
+import { copyFileSync, mkdirSync, readdirSync, existsSync } from "fs";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Copy icons immediately on config load
+function ensureIcons() {
+  const iconsSrc = join(__dirname, "public", "icons");
+  const iconsDst = join(__dirname, "dist", "chrome-mv3", "icons");
+  if (existsSync(iconsSrc)) {
+    mkdirSync(iconsDst, { recursive: true });
+    for (const f of readdirSync(iconsSrc)) {
+      copyFileSync(join(iconsSrc, f), join(iconsDst, f));
+    }
+  }
+}
+
+// Run immediately
+ensureIcons();
 
 export default defineConfig({
   manifestVersion: 3,
   srcDir: "src",
   outDir: "dist",
+  publicDir: "public",
   manifest: {
     name: "ProWrite",
     description: "Save jobs and generate tailored documents from any job board",
@@ -15,5 +36,11 @@ export default defineConfig({
       "48": "icons/icon-48.png",
       "128": "icons/icon-128.png",
     },
+    content_security_policy: {
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';",
+    },
+  },
+  hooks: {
+    "build:done": ensureIcons,
   },
 });

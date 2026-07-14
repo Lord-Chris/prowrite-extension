@@ -1,4 +1,8 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, createElement } from "react";
+import { Document as PdfDocument, Page, View, Text } from "@react-pdf/renderer";
+import { pdf } from "@react-pdf/renderer";
+import { Document, Packer, Paragraph, TextRun, AlignmentType, BorderStyle, TabStopType } from "docx";
+import { format } from "date-fns";
 import { getAccessToken, getUserDisplayName, getInitials } from "../../lib/auth";
 import { extractJobDetails, saveJob, generateDocuments, AuthFetchError } from "../../lib/api";
 import type { ExtractedJob } from "../../lib/api";
@@ -145,13 +149,13 @@ function renderResumeHTML(snapshot: any, styling?: any): string {
 
   const parts: string[] = [];
 
-  parts.push(`<div style="font-family:${fontFamily},serif;max-width:700px;margin:0 auto;padding:${marginTop}px ${marginRight}px ${marginBottom}px ${marginLeft}px;color:#1a1a1a;font-size:${fontSize}pt;line-height:${lineHeight};">`);
+  parts.push(`<div style="font-family:${fontFamily},serif;max-width:700px;margin:0 auto;padding:${marginTop}px ${marginRight}px ${marginBottom}px ${marginLeft}px;color:#1a1a1a;font-size:${fontSize}px;line-height:${lineHeight};">`);
 
   if (isVisible("contact_info") && snapshot.contactInfo?.full_name) {
     parts.push(`<div style="text-align:${textAlign};margin-bottom:${sectionSpacing}px;">`);
-    parts.push(`<h1 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize + 6}pt;margin:0;font-weight:${headingFontWeight === "bold" ? 700 : headingFontWeight};">${escapeHtml(snapshot.contactInfo.full_name)}</h1>`);
+    parts.push(`<h1 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize + 6}px;margin:0;font-weight:${headingFontWeight === "bold" ? 700 : headingFontWeight};">${escapeHtml(snapshot.contactInfo.full_name)}</h1>`);
     if (isVisible("preferred_title") && snapshot.profile?.preferred_title) {
-      parts.push(`<p style="margin:4px 0 0;font-size:${fontSize + 1}pt;">${escapeHtml(snapshot.profile.preferred_title)}</p>`);
+      parts.push(`<p style="margin:4px 0 0;font-size:${fontSize + 1}px;">${escapeHtml(snapshot.profile.preferred_title)}</p>`);
     }
     const details = [
       snapshot.contactInfo.email,
@@ -159,7 +163,7 @@ function renderResumeHTML(snapshot: any, styling?: any): string {
       snapshot.contactInfo.location,
     ].filter(Boolean).map(escapeHtml);
     if (details.length) {
-      parts.push(`<p style="margin:4px 0 0;font-size:${fontSize - 1}pt;color:#555;">${details.join(" &nbsp;|&nbsp; ")}</p>`);
+      parts.push(`<p style="margin:4px 0 0;font-size:${fontSize - 1}px;color:#555;">${details.join(" • ")}</p>`);
     }
     parts.push(`</div>`);
   }
@@ -170,7 +174,7 @@ function renderResumeHTML(snapshot: any, styling?: any): string {
       render: () => {
         if (!snapshot.professionalSummary) return;
         const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
-        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Summary</h2>`);
+        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}px;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Summary</h2>`);
         parts.push(`<p style="margin:0 0 ${sectionSpacing}px;">${escapeHtml(snapshot.professionalSummary)}</p>`);
       },
     },
@@ -179,7 +183,7 @@ function renderResumeHTML(snapshot: any, styling?: any): string {
       render: () => {
         if (!snapshot.skills?.length) return;
         const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
-        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Skills</h2>`);
+        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}px;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Skills</h2>`);
         for (const cat of ["proficient", "familiar", "tools"]) {
           const items = snapshot.skills.filter((s: any) => s.category === cat);
           if (!items.length) continue;
@@ -189,49 +193,48 @@ function renderResumeHTML(snapshot: any, styling?: any): string {
       },
     },
     {
-      type: "work_experience",
-      render: () => {
-        if (!snapshot.workExperiences?.length) return;
-        const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
-        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Experience</h2>`);
-        for (const w of snapshot.workExperiences) {
-          const dates = [w.start_date, w.end_date || (w.is_current ? "Present" : "")].filter(Boolean).join(" — ");
-          parts.push(`<div style="margin-bottom:${bulletSpacing}px;">`);
-          parts.push(`<p style="margin:0;font-weight:600;">${escapeHtml(w.role)} at ${escapeHtml(w.company)}</p>`);
-          if (dates) parts.push(`<p style="margin:0;font-size:10pt;color:#555;">${escapeHtml(dates)}</p>`);
-          if (w.bullets?.length) {
-            parts.push(`<ul style="margin:${bulletSpacing}px 0 0;padding-left:18px;">`);
-            for (const b of w.bullets) {
-              parts.push(`<li style="margin-bottom:2px;">${escapeHtml(b.content)}</li>`);
-            }
-            parts.push(`</ul>`);
-          }
-          parts.push(`</div>`);
-        }
-      },
+       type: "work_experience",
+       render: () => {
+         if (!snapshot.workExperiences?.length) return;
+         const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
+         parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}px;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Experience</h2>`);
+         for (const w of snapshot.workExperiences) {
+           const dates = `${w.start_date ? new Date(w.start_date).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""} – ${w.is_current ? "Present" : w.end_date ? new Date(w.end_date).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""}`.replace(/^ – /, "").replace(/ – $/, "");
+           parts.push(`<div style="margin-bottom:${bulletSpacing}px;">`);
+           parts.push(`<div style="display:flex;justify-content:space-between;"><p style="margin:0;font-weight:600;">${escapeHtml(w.role)}</p><p style="margin:0;font-size:${fontSize - 1}px;color:#555;">${escapeHtml(dates)}</p></div>`);
+           parts.push(`<p style="margin:0;font-style:italic;">${escapeHtml(w.company)}</p>`);
+           if (w.bullets?.length) {
+             parts.push(`<ul style="margin:${bulletSpacing}px 0 0;padding-left:0;list-style-type:disc;list-style-position:outside;margin-left:16px;">`);
+             for (const b of w.bullets) {
+               parts.push(`<li style="margin-bottom:${bulletSpacing / 2}px;">${escapeHtml(b.content)}</li>`);
+             }
+             parts.push(`</ul>`);
+           }
+           parts.push(`</div>`);
+         }
+       },
     },
-    {
-      type: "education",
-      render: () => {
-        if (!snapshot.education?.length) return;
-        const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
-        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Education</h2>`);
-        for (const e of snapshot.education) {
-          const dates = [e.start_date, e.end_date || (e.is_current ? "Present" : "")].filter(Boolean).join(" — ");
-          parts.push(`<p style="margin:0 0 4px;"><strong>${escapeHtml(e.school)}</strong>`);
-          if (e.degree) parts.push(` — ${escapeHtml(e.degree)}`);
-          if (e.field_of_study) parts.push(` in ${escapeHtml(e.field_of_study)}`);
-          if (dates) parts.push(`<br/><span style="color:#555;">${escapeHtml(dates)}</span>`);
-          parts.push(`</p>`);
-        }
-      },
-    },
+     {
+       type: "education",
+       render: () => {
+         if (!snapshot.education?.length) return;
+         const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
+         parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}px;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Education</h2>`);
+         for (const e of snapshot.education) {
+           const dateStr = `${e.start_date ? new Date(e.start_date).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : ""}${e.end_date ? ` – ${new Date(e.end_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}` : e.is_current ? " – Present" : ""}`.trim();
+           parts.push(`<div style="display:flex;justify-content:space-between;margin-bottom:4px;"><div><p style="margin:0 0 4px;"><strong>${escapeHtml(e.school)}</strong>`);
+           if (e.degree) parts.push(` — ${escapeHtml(e.degree)}`);
+           if (e.field_of_study) parts.push(` in ${escapeHtml(e.field_of_study)}`);
+           parts.push(`</p></div><p style="margin:0;font-size:${fontSize - 1}px;color:#555;white-space:nowrap;margin-left:8px;">${escapeHtml(dateStr)}</p></div>`);
+         }
+       },
+     },
     {
       type: "projects",
       render: () => {
         if (!snapshot.projects?.length) return;
         const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
-        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Projects</h2>`);
+        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}px;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Projects</h2>`);
         for (const p of snapshot.projects) {
           parts.push(`<p style="margin:0 0 2px;"><strong>${escapeHtml(p.name)}</strong>`);
           if (p.description) parts.push(` — ${escapeHtml(p.description)}`);
@@ -244,7 +247,7 @@ function renderResumeHTML(snapshot: any, styling?: any): string {
       render: () => {
         if (!snapshot.certifications?.length) return;
         const fw = headingFontWeight === "bold" ? 700 : headingFontWeight;
-        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}pt;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Certifications</h2>`);
+        parts.push(`<h2 style="font-family:${headingFontFamily},serif;font-size:${headingFontSize}px;font-weight:${fw};text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid #333;padding-bottom:2px;margin:${sectionSpacing}px 0 8px;">Certifications</h2>`);
         for (const cert of snapshot.certifications) {
           parts.push(`<p style="margin:0 0 2px;"><strong>${escapeHtml(cert.name)}</strong>`);
           if (cert.issuer) parts.push(` — ${escapeHtml(cert.issuer)}`);
@@ -272,12 +275,48 @@ function renderResumeHTML(snapshot: any, styling?: any): string {
   return parts.join("\n");
 }
 
+// Export resume as PDF blob using react-pdf
+async function exportResumePdf(snapshot: any, styling?: any): Promise<Blob> {
+  try {
+    const blob = await pdf(
+      createElement(ResumePdfDocument, { data: snapshot, styling: styling || {} })
+    ).toBlob();
+    return blob;
+  } catch (err) {
+    console.error("PDF export failed:", err);
+    throw err;
+  }
+}
+
+// Download resume PDF directly
+async function downloadResumePdf(filename: string, snapshot: any, styling?: any) {
+  try {
+    const blob = await exportResumePdf(snapshot, styling);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    console.error("Error downloading PDF:", err);
+  }
+}
+
 function openPrintWindow(title: string, htmlContent: string) {
-  const win = window.open("", "_blank");
-  if (!win) return;
-  win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>@media print{body{margin:0;padding:20px}}</style></head><body>${htmlContent}</body></html>`);
-  win.document.close();
-  setTimeout(() => win.print(), 300);
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;left:-99999px;top:0;width:0;height:0;border:none;visibility:hidden;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
+  if (!doc) { document.body.removeChild(iframe); return; }
+  doc.open();
+  doc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>@page{size:letter;margin:0;}body{margin:0;}</style></head><body>${htmlContent}</body></html>`);
+  doc.close();
+  iframe.onload = () => {
+    iframe.contentWindow?.focus();
+    iframe.contentWindow?.print();
+    setTimeout(() => document.body.removeChild(iframe), 1000);
+  };
 }
 
 function formatCoverLetterHTML(text: string, styling?: any): string {
@@ -285,13 +324,533 @@ function formatCoverLetterHTML(text: string, styling?: any): string {
   const fontFamily = s.fontFamily || "Georgia";
   const fontSize = s.fontSize || 11;
   const lineHeight = s.lineHeight || 1.6;
-  return `<div style="font-family:${fontFamily},serif;max-width:650px;margin:0 auto;padding:40px;color:#1a1a1a;font-size:${fontSize}pt;line-height:${lineHeight};white-space:pre-wrap;">${escapeHtml(text).replace(/\n/g, "<br/>")}</div>`;
+  return `<div style="font-family:${fontFamily},serif;max-width:650px;margin:0 auto;padding:40px;color:#1a1a1a;font-size:${fontSize}px;line-height:${lineHeight};white-space:pre-wrap;">${escapeHtml(text).replace(/\n/g, "<br/>")}</div>`;
+}
+
+// px → twips (1px at 96dpi ≈ 15.12 twips)
+const pxToTwip = (px: number) => Math.round(px * 15.12);
+// px → half-points (docx font size unit; 1px ≈ 0.75pt; 1pt = 2 half-pts)
+const pxToHalfPt = (px: number) => Math.round(px * 1.5);
+
+// Page size constants (in twips)
+// LETTER: 8.5in × 11in (12240 × 15840 twips)
+// A4: 210mm × 297mm (11906 × 16838 twips)
+const PAGE_WIDTHS = {
+  LETTER: 12240,
+  A4: 11906,
+} as const;
+
+const PAGE_HEIGHTS = {
+  LETTER: 15840,
+  A4: 16838,
+} as const;
+
+function getDocxAlignment(a: string): typeof AlignmentType[keyof typeof AlignmentType] {
+  if (a === "center") return AlignmentType.CENTER;
+  if (a === "right") return AlignmentType.RIGHT;
+  if (a === "justified") return AlignmentType.JUSTIFIED;
+  return AlignmentType.LEFT;
+}
+
+// PDF Document Component (matches prowrite-lovable)
+function ResumePdfDocument({ data, styling }: any) {
+  const defaultStyling = {
+    fontFamily: "Times-Roman",
+    fontSize: 11,
+    headingFontFamily: "Times-Roman",
+    headingFontSize: 14,
+    headingFontWeight: "bold",
+    lineHeight: 1.4,
+    sectionSpacing: 12,
+    bulletSpacing: 4,
+    marginTop: 40,
+    marginBottom: 40,
+    marginLeft: 50,
+    marginRight: 50,
+    alignment: "left",
+  };
+  
+  const c = { ...defaultStyling, ...(styling || {}) };
+  const { contactInfo, profile, workExperiences, skills, education, projects, certifications, sectionOrder } = data;
+  
+  // Normalise professionalSummary (string) to summaries (array of objects) for consistency
+  const summaries = data.summaries
+    ?? (data.professionalSummary
+        ? [{ id: "summary", content: data.professionalSummary }]
+        : []);
+
+  // Compute visible sections based on sectionOrder or fallback to default
+  const visibleSections = sectionOrder?.length > 0
+    ? sectionOrder.filter((sec: any) => sec.is_visible).map((sec: any) => sec.section_type)
+    : ["contact_info", "preferred_title", "professional_summary", "skills", "work_experience", "projects", "certifications", "education"];
+
+  const fontFamily = c.fontFamily?.toLowerCase().includes("georgia") || c.fontFamily?.toLowerCase().includes("serif")
+    ? "Times-Roman"
+    : c.fontFamily?.toLowerCase().includes("arial") || c.fontFamily?.toLowerCase().includes("helvetica") || c.fontFamily?.toLowerCase().includes("sans")
+      ? "Helvetica"
+      : "Times-Roman";
+
+  const headingFontFamily = c.headingFontFamily?.toLowerCase().includes("georgia") || c.headingFontFamily?.toLowerCase().includes("serif")
+    ? "Times-Roman"
+    : c.headingFontFamily?.toLowerCase().includes("arial") || c.headingFontFamily?.toLowerCase().includes("helvetica") || c.headingFontFamily?.toLowerCase().includes("sans")
+      ? "Helvetica"
+      : "Times-Roman";
+
+  const headingStyle = {
+    fontFamily: headingFontFamily,
+    fontSize: c.headingFontSize || 14,
+    fontWeight: (c.headingFontWeight === "bold" ? "bold" : "normal") as const,
+    borderBottomWidth: 1,
+    borderBottomColor: "#333333",
+    paddingBottom: 2,
+    marginBottom: c.bulletSpacing || 4,
+    textTransform: "uppercase" as const,
+    letterSpacing: 0.5,
+  };
+
+  const textAlign = (c.alignment === "center" ? "center" : c.alignment === "right" ? "right" : "left") as const;
+
+  const fmtDate = (d: string | null | undefined) => {
+    if (!d) return "";
+    try {
+      return format(new Date(d), "MMM yyyy");
+    } catch {
+      return d || "";
+    }
+  };
+
+  // Map section types to render functions
+  const sectionRenderers: Record<string, () => React.ReactNode> = {
+    contact_info: () => contactInfo?.full_name ? (
+      <View style={{ textAlign: "center", marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={{ fontSize: (c.headingFontSize || 14) + 4, fontWeight: "bold", fontFamily: headingFontFamily, lineHeight: 1, marginBottom: 0 }}>
+          {contactInfo.full_name}
+        </Text>
+        {profile?.preferred_title && (
+          <Text style={{ fontSize: (c.fontSize || 11) + 1, marginTop: 2, lineHeight: 1 }}>
+            {profile.preferred_title}
+          </Text>
+        )}
+        <View style={{ fontSize: c.fontSize - 1, marginTop: 4, display: "flex", flexDirection: "row", justifyContent: "center", flexWrap: "wrap" }}>
+          {(() => {
+            const fields = [contactInfo.email, contactInfo.phone, contactInfo.location, contactInfo.linkedin_url, contactInfo.github_url, contactInfo.portfolio_url].filter(Boolean);
+            return fields.map((item, idx) => (
+              <React.Fragment key={idx}>
+                <Text style={{ color: "#000000" }}>{item}</Text>
+                {idx < fields.length - 1 && (
+                  <Text style={{ paddingLeft: 6, paddingRight: 6 }}>•</Text>
+                )}
+              </React.Fragment>
+            ));
+          })()}
+        </View>
+      </View>
+    ) : null,
+
+    preferred_title: () => null,
+
+    professional_summary: () => summaries?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Summary</Text>
+        {summaries.map((s: any) => (
+          <Text key={s.id} style={{ marginBottom: c.bulletSpacing || 4, fontFamily }}>
+            {s.content}
+          </Text>
+        ))}
+      </View>
+    ) : null,
+
+    skills: () => skills?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Skills</Text>
+        {["proficient", "familiar", "tools"].map((cat) => {
+          const items = skills.filter((sk: any) => sk.category === cat);
+          if (items.length === 0) return null;
+          const label = cat === "proficient" ? "Proficient" : cat === "familiar" ? "Familiar" : "Tools";
+          return (
+            <Text key={cat} style={{ marginBottom: c.bulletSpacing || 4, fontFamily }}>
+              <Text style={{ fontWeight: "bold" }}>{label}:</Text> {items.map((sk: any) => sk.name).join(", ")}
+            </Text>
+          );
+        })}
+      </View>
+    ) : null,
+
+    work_experience: () => workExperiences?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Experience</Text>
+        {workExperiences.map((w: any) => (
+          <View key={w.id} style={{ marginBottom: (c.sectionSpacing || 12) - 4 }}>
+            <View style={{ display: "flex", flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontWeight: "bold", fontFamily }}>
+                {w.role}
+              </Text>
+              <Text style={{ fontSize: (c.fontSize || 11) - 1, fontFamily }}>
+                {fmtDate(w.start_date)} – {w.is_current ? "Present" : fmtDate(w.end_date)}
+              </Text>
+            </View>
+            <Text style={{ fontStyle: "italic", fontFamily }}>
+              {w.company}
+            </Text>
+            {w.bullets?.length > 0 && (
+              <View style={{ marginTop: c.bulletSpacing || 4 }}>
+                {w.bullets.map((b: any) => (
+                  <View key={b.id} style={{ display: "flex", flexDirection: "row", marginBottom: (c.bulletSpacing || 4) / 4, marginLeft: 4 }}>
+                    <Text style={{ fontFamily }}>•</Text>
+                    <Text style={{ fontFamily, marginLeft: 8 }}>
+                      {b.content}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        ))}
+      </View>
+    ) : null,
+
+    projects: () => projects?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Projects</Text>
+        {projects.map((p: any) => (
+          <View key={p.id} style={{ marginBottom: c.bulletSpacing || 4 }}>
+            <View style={{ display: "flex", flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontWeight: "bold", fontFamily }}>
+                {p.name}{p.url ? ` — ${p.url}` : ""}
+              </Text>
+              {(p.start_date || p.end_date) && (
+                <Text style={{ fontSize: c.fontSize - 1, fontFamily }}>
+                  {fmtDate(p.start_date)}{p.end_date ? ` – ${fmtDate(p.end_date)}` : ""}
+                </Text>
+              )}
+            </View>
+            {p.description && (
+              <Text style={{ marginTop: 2, fontFamily }}>
+                {p.description}
+              </Text>
+            )}
+          </View>
+        ))}
+      </View>
+    ) : null,
+
+    certifications: () => certifications?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Certifications</Text>
+        {certifications.map((cert: any) => (
+          <Text key={cert.id} style={{ marginBottom: c.bulletSpacing || 4, fontFamily }}>
+            <Text style={{ fontWeight: "bold" }}>{cert.name}</Text>
+            {cert.issuer ? ` — ${cert.issuer}` : ""}
+            {cert.issue_date ? ` (${fmtDate(cert.issue_date)})` : ""}
+          </Text>
+        ))}
+      </View>
+    ) : null,
+
+    education: () => education?.length > 0 ? (
+      <View style={{ marginBottom: c.sectionSpacing || 12 }}>
+        <Text style={headingStyle}>Education</Text>
+        {education.map((e: any) => (
+          <View key={e.id} style={{ marginBottom: c.bulletSpacing || 4 }}>
+            <View style={{ display: "flex", flexDirection: "row", justifyContent: "space-between" }}>
+              <Text style={{ fontWeight: "bold", fontFamily }}>
+                {e.school}
+              </Text>
+              <Text style={{ fontSize: (c.fontSize || 11) - 1, fontFamily }}>
+                {fmtDate(e.start_date)}{e.end_date ? ` – ${fmtDate(e.end_date)}` : e.is_current ? " – Present" : ""}
+              </Text>
+            </View>
+            {(e.degree || e.field_of_study) && (
+              <Text style={{ fontFamily }}>
+                {[e.degree, e.field_of_study].filter(Boolean).join(", ")}
+              </Text>
+            )}
+          </View>
+        ))}
+      </View>
+    ) : null,
+  };
+
+  return (
+    <PdfDocument>
+      <Page
+        size="LETTER"
+        style={{
+          paddingTop: c.marginTop || 40,
+          paddingBottom: c.marginBottom || 40,
+          paddingLeft: c.marginLeft || 50,
+          paddingRight: c.marginRight || 50,
+          fontFamily,
+          fontSize: c.fontSize || 11,
+          lineHeight: c.lineHeight || 1.4,
+          textAlign,
+        }}
+      >
+        {visibleSections.map((type: string) => {
+          const render = sectionRenderers[type];
+          return render ? <View key={type}>{render()}</View> : null;
+        })}
+      </Page>
+    </PdfDocument>
+  );
+}
+
+async function buildResumeDocx(snapshot: any, styling?: any, pageSize: "LETTER" | "A4" = "LETTER"): Promise<Blob> {
+  const s = styling || {};
+  const fontFamily = s.fontFamily || "Georgia";
+  const fontSize = s.fontSize || 11;
+  const headingFontFamily = s.headingFontFamily || "Georgia";
+  const headingFontSize = s.headingFontSize || 14;
+  const headingFontWeight = s.headingFontWeight || "bold";
+  const lineHeight = s.lineHeight || 1.4;
+  const sectionSpacing = s.sectionSpacing || 12;
+  const bulletSpacing = s.bulletSpacing || 4;
+  const marginTop = s.marginTop ?? 40;
+  const marginBottom = s.marginBottom ?? 40;
+  const marginLeft = s.marginLeft ?? 50;
+  const marginRight = s.marginRight ?? 50;
+  const alignment = s.alignment || "left";
+
+  // Compute page dimensions and text width for tab stop positioning
+  const pageWidthTwips = PAGE_WIDTHS[pageSize];
+  const pageHeightTwips = PAGE_HEIGHTS[pageSize];
+  const textWidthTwips = pageWidthTwips - pxToTwip(marginLeft) - pxToTwip(marginRight);
+
+  const align = getDocxAlignment(alignment);
+  const bodySize = pxToHalfPt(fontSize);
+  const headingSize = pxToHalfPt(headingFontSize);
+  const nameSize = pxToHalfPt(headingFontSize + 4);
+  const smallSize = pxToHalfPt(fontSize - 1);
+  const headingBold = headingFontWeight === "bold" || headingFontWeight === "700";
+  const sectionSpacingTwip = pxToTwip(sectionSpacing);
+  const bulletSpacingTwip = pxToTwip(bulletSpacing);
+
+  const paragraphs: Paragraph[] = [];
+
+  const sectionHeading = (text: string) => new Paragraph({
+    alignment: AlignmentType.LEFT,
+    spacing: { before: sectionSpacingTwip, after: bulletSpacingTwip },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "333333", space: 2 } },
+    children: [new TextRun({ text: text.toUpperCase(), font: headingFontFamily, size: headingSize, bold: headingBold, characterSpacing: 10 })],
+  });
+
+  const bodyPara = (text: string, opts?: { bold?: boolean; italic?: boolean; size?: number; spacingAfter?: number }) =>
+    new Paragraph({
+      alignment: align,
+      spacing: { after: opts?.spacingAfter ?? bulletSpacingTwip },
+      children: [new TextRun({ text, font: fontFamily, size: opts?.size ?? bodySize, bold: opts?.bold, italics: opts?.italic })],
+    });
+
+  function fmtDate(d: string | null | undefined): string {
+    if (!d) return "";
+    try {
+      const dt = new Date(d);
+      return dt.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+    } catch { return d; }
+  }
+
+  function isVisible(type: string): boolean {
+    if (!snapshot.sectionOrder) return true;
+    const entry = snapshot.sectionOrder.find((so: any) => so.section_type === type);
+    return entry?.is_visible ?? true;
+  }
+
+  const defaultOrder = ["professional_summary", "skills", "work_experience", "education", "projects", "certifications"];
+  const orderedTypes: string[] = snapshot.sectionOrder
+    ? [...snapshot.sectionOrder]
+        .filter((so: any) => so.is_visible !== false)
+        .sort((a: any, b: any) => a.sort_order - b.sort_order)
+        .map((so: any) => so.section_type)
+    : defaultOrder;
+
+  // Contact info header (always first)
+  if (isVisible("contact_info") && snapshot.contactInfo?.full_name) {
+    paragraphs.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: pxToTwip(2) },
+      children: [new TextRun({ text: snapshot.contactInfo.full_name, font: headingFontFamily, size: nameSize, bold: true })],
+    }));
+    if (isVisible("preferred_title") && snapshot.profile?.preferred_title) {
+      paragraphs.push(new Paragraph({
+        alignment: AlignmentType.CENTER,
+        spacing: { after: pxToTwip(2) },
+        children: [new TextRun({ text: snapshot.profile.preferred_title, font: fontFamily, size: pxToHalfPt(fontSize + 1) })],
+      }));
+    }
+    const details = [snapshot.contactInfo.email, snapshot.contactInfo.phone, snapshot.contactInfo.location, snapshot.contactInfo.linkedin_url, snapshot.contactInfo.github_url, snapshot.contactInfo.portfolio_url].filter(Boolean) as string[];
+    if (details.length) paragraphs.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { after: sectionSpacingTwip },
+      children: details.flatMap((item, idx) => [
+        new TextRun({ text: item, font: fontFamily, size: smallSize }),
+        ...(idx < details.length - 1
+          ? [new TextRun({ text: "   •   ", font: fontFamily, size: smallSize })]
+          : []),
+      ]),
+    }));
+  }
+
+  for (const type of orderedTypes) {
+    if (type === "contact_info" || type === "preferred_title") continue;
+    switch (type) {
+      case "professional_summary":
+        if (snapshot.professionalSummary) {
+          paragraphs.push(sectionHeading("Summary"));
+          paragraphs.push(bodyPara(snapshot.professionalSummary));
+        }
+        break;
+      case "skills":
+        if (snapshot.skills?.length) {
+          paragraphs.push(sectionHeading("Skills"));
+          for (const cat of ["proficient", "familiar", "tools"]) {
+            const items = snapshot.skills.filter((sk: any) => sk.category === cat);
+            if (!items.length) continue;
+            const label = cat === "proficient" ? "Proficient" : cat === "familiar" ? "Familiar" : "Tools";
+            paragraphs.push(new Paragraph({
+              alignment: align,
+              spacing: { after: bulletSpacingTwip },
+              children: [
+                new TextRun({ text: `${label}: `, font: fontFamily, size: bodySize, bold: true }),
+                new TextRun({ text: items.map((sk: any) => sk.name).join(", "), font: fontFamily, size: bodySize }),
+              ],
+            }));
+          }
+        }
+        break;
+      case "work_experience":
+        if (snapshot.workExperiences?.length) {
+          paragraphs.push(sectionHeading("Experience"));
+           for (const w of snapshot.workExperiences) {
+             const dateStr = `${fmtDate(w.start_date)} – ${w.is_current ? "Present" : fmtDate(w.end_date)}`;
+             paragraphs.push(new Paragraph({
+               alignment: AlignmentType.LEFT,
+               spacing: { after: pxToTwip(2) },
+               tabStops: [{ type: TabStopType.RIGHT, position: textWidthTwips }],
+               children: [
+                 new TextRun({ text: w.role ?? "", font: fontFamily, size: bodySize, bold: true }),
+                 new TextRun({ text: `\t${dateStr}`, font: fontFamily, size: smallSize }),
+               ],
+             }));
+            paragraphs.push(bodyPara(`${w.company ?? ""}`, { italic: true, spacingAfter: bulletSpacingTwip }));
+            for (const b of w.bullets ?? []) paragraphs.push(new Paragraph({
+              alignment: align,
+              spacing: { after: pxToTwip(bulletSpacing / 2) },
+              indent: { left: 181, hanging: 120 },
+              children: [
+                new TextRun({ text: "•\t", font: fontFamily, size: bodySize }),
+                new TextRun({ text: b.content, font: fontFamily, size: bodySize }),
+              ],
+            }));
+          }
+        }
+        break;
+      case "education":
+        if (snapshot.education?.length) {
+          paragraphs.push(sectionHeading("Education"));
+           for (const e of snapshot.education) {
+             const dateStr = `${fmtDate(e.start_date)}${e.end_date ? ` – ${fmtDate(e.end_date)}` : e.is_current ? " – Present" : ""}`;
+             paragraphs.push(new Paragraph({
+               alignment: AlignmentType.LEFT,
+               spacing: { after: pxToTwip(2) },
+               tabStops: [{ type: TabStopType.RIGHT, position: textWidthTwips }],
+               children: [
+                 new TextRun({ text: e.school ?? "", font: fontFamily, size: bodySize, bold: true }),
+                 ...(dateStr ? [new TextRun({ text: `\t${dateStr}`, font: fontFamily, size: smallSize })] : []),
+               ],
+             }));
+            const degreeField = [e.degree, e.field_of_study].filter(Boolean).join(", ");
+            if (degreeField) paragraphs.push(bodyPara(degreeField, { spacingAfter: bulletSpacingTwip }));
+          }
+        }
+        break;
+      case "projects":
+        if (snapshot.projects?.length) {
+          paragraphs.push(sectionHeading("Projects"));
+          for (const p of snapshot.projects) {
+            paragraphs.push(new Paragraph({
+              alignment: align,
+              spacing: { after: pxToTwip(2) },
+              children: [new TextRun({ text: `${p.name}${p.url ? ` — ${p.url}` : ""}`, font: fontFamily, size: bodySize, bold: true })],
+            }));
+            if (p.description) paragraphs.push(bodyPara(p.description, { spacingAfter: bulletSpacingTwip }));
+          }
+        }
+        break;
+      case "certifications":
+        if (snapshot.certifications?.length) {
+          paragraphs.push(sectionHeading("Certifications"));
+          for (const cert of snapshot.certifications) {
+            paragraphs.push(new Paragraph({
+              alignment: align,
+              spacing: { after: bulletSpacingTwip },
+              children: [
+                new TextRun({ text: cert.name, font: fontFamily, size: bodySize, bold: true }),
+                ...(cert.issuer ? [new TextRun({ text: ` — ${cert.issuer}`, font: fontFamily, size: bodySize })] : []),
+              ],
+            }));
+          }
+        }
+        break;
+     }
+   }
+
+   const doc = new Document({
+     sections: [{
+       properties: {
+         page: {
+           size: { width: pageWidthTwips, height: pageHeightTwips },
+           margin: { top: pxToTwip(marginTop), bottom: pxToTwip(marginBottom), left: pxToTwip(marginLeft), right: pxToTwip(marginRight) },
+         },
+       },
+       children: paragraphs,
+     }],
+   });
+
+   return Packer.toBlob(doc);
+ }
+
+async function buildCoverLetterDocx(text: string, styling?: any): Promise<Blob> {
+  const s = styling || {};
+  const fontFamily = s.fontFamily || "Georgia";
+  const fontSize = s.fontSize || 11;
+  const marginTop = s.marginTop ?? 40;
+  const marginBottom = s.marginBottom ?? 40;
+  const marginLeft = s.marginLeft ?? 50;
+  const marginRight = s.marginRight ?? 50;
+
+  const paragraphs = text.split("\n").map(line => new Paragraph({
+    children: [new TextRun({ text: line, font: fontFamily, size: pxToHalfPt(fontSize) })],
+    spacing: { after: 160 },
+  }));
+
+  const doc = new Document({
+    sections: [{
+      properties: {
+        page: {
+          margin: { top: pxToTwip(marginTop), bottom: pxToTwip(marginBottom), left: pxToTwip(marginLeft), right: pxToTwip(marginRight) },
+        },
+      },
+      children: paragraphs,
+    }],
+  });
+
+  return Packer.toBlob(doc);
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function App() {
   const [state, setState] = useState<State>({ phase: "checking-auth" });
   const [profileName, setProfileName] = useState<string | null>(null);
   const [coverLetterExpanded, setCoverLetterExpanded] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -419,16 +978,43 @@ export default function App() {
     runSaveAndGenerate(state.job, state.pageUrl);
   };
 
-  const openResumePrint = () => {
+  const downloadResumePdfFile = async () => {
     if (state.phase !== "done" || !state.contentSnapshot) return;
-    const html = renderResumeHTML(state.contentSnapshot, state.stylingSnapshot);
-    openPrintWindow(`Resume - ${state.title} at ${state.company}`, html);
+    setDownloadError(null);
+    try {
+      const filename = `CV_${(state.company ?? "").replace(/\s+/g, "_")}_${(state.title ?? "").replace(/\s+/g, "_")}.pdf`;
+      await downloadResumePdf(filename, state.contentSnapshot, state.stylingSnapshot);
+    } catch (err: any) {
+      const msg = err?.message || "Failed to download PDF. Please try again.";
+      setDownloadError(msg);
+      console.error("Resume PDF download error:", err);
+    }
+  };
+
+  const downloadResumeDocx = async () => {
+    if (state.phase !== "done" || !state.contentSnapshot) return;
+    setDownloadError(null);
+    try {
+      const blob = await buildResumeDocx(state.contentSnapshot, state.stylingSnapshot);
+      const filename = `CV_${(state.company ?? "").replace(/\s+/g, "_")}_${(state.title ?? "").replace(/\s+/g, "_")}.docx`;
+      downloadBlob(blob, filename);
+    } catch (err: any) {
+      const msg = err?.message || "Failed to download Word document. Please try again.";
+      setDownloadError(msg);
+      console.error("Resume DOCX download error:", err);
+    }
   };
 
   const openCoverLetterPrint = () => {
     if (state.phase !== "done" || !state.coverLetter) return;
     const html = formatCoverLetterHTML(state.coverLetter, state.stylingSnapshot);
     openPrintWindow(`Cover Letter - ${state.title} at ${state.company}`, html);
+  };
+
+  const downloadCoverLetterDocx = async () => {
+    if (state.phase !== "done" || !state.coverLetter) return;
+    const blob = await buildCoverLetterDocx(state.coverLetter, state.stylingSnapshot);
+    downloadBlob(blob, `Cover_Letter_${(state.title ?? "").replace(/\s+/g, "_")}_at_${(state.company ?? "").replace(/\s+/g, "_")}.docx`);
   };
 
   const copyToClipboard = async (text: string | undefined) => {
@@ -546,22 +1132,58 @@ export default function App() {
           </div>
         )}
 
-        {state.phase === "done" && (
-          <div className="done">
-            <div className="done-header">
-              <p className="icon">✅</p>
-              <p className="title">{state.title} at {state.company}</p>
-              <p className="desc">Documents generated successfully</p>
-            </div>
+         {state.phase === "done" && (
+           <div className="done">
+             <div className="done-header">
+               <p className="icon">✅</p>
+               <p className="title">{state.title} at {state.company}</p>
+               <p className="desc">Documents generated successfully</p>
+             </div>
 
-            <div className="doc-section">
+             {downloadError && (
+               <div style={{
+                 backgroundColor: "#fee2e2",
+                 border: "1px solid #fecaca",
+                 borderRadius: "6px",
+                 padding: "12px",
+                 marginBottom: "16px",
+                 display: "flex",
+                 justifyContent: "space-between",
+                 alignItems: "center",
+               }}>
+                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                   <span style={{ fontSize: "16px" }}>⚠️</span>
+                   <p style={{ margin: 0, color: "#991b1b", fontSize: "13px" }}>{downloadError}</p>
+                 </div>
+                 <button
+                   onClick={() => setDownloadError(null)}
+                   style={{
+                     background: "none",
+                     border: "none",
+                     cursor: "pointer",
+                     color: "#991b1b",
+                     fontSize: "18px",
+                     padding: "0 4px",
+                   }}
+                 >
+                   ✕
+                 </button>
+               </div>
+             )}
+
+             <div className="doc-section">
               <div className="doc-section-header">
                 <span className="doc-icon">📄</span>
                 <span>CV / Resume</span>
               </div>
-              <button className="btn btn-secondary full" onClick={openResumePrint}>
-                Download
-              </button>
+               <div className="btn-group">
+                 <button className="btn btn-secondary" onClick={() => void downloadResumePdfFile()}>
+                   PDF
+                 </button>
+                 <button className="btn btn-secondary" onClick={() => void downloadResumeDocx()}>
+                   Word
+                 </button>
+               </div>
             </div>
 
             {state.coverLetter && (
@@ -588,7 +1210,10 @@ export default function App() {
                     Copy
                   </button>
                   <button className="btn btn-secondary" onClick={openCoverLetterPrint}>
-                    Download PDF
+                    PDF
+                  </button>
+                  <button className="btn btn-secondary" onClick={() => void downloadCoverLetterDocx()}>
+                    Word
                   </button>
                 </div>
               </div>

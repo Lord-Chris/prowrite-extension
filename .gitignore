@@ -2,6 +2,7 @@ node_modules/
 dist/
 .wxt/
 *.local
+.env.production
 .DS_Store
 
 # Supabase

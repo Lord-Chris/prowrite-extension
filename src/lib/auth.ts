@@ -1,10 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 
-const SUPABASE_URL = "https://idehaaowusoylwtgnndh.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkZWhhYW93dXNveWx3dGdubmRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyMTk5NDcsImV4cCI6MjA5Mjc5NTk0N30.LiCLkPRF8XTdbHIBEik-i_-9ldfRJruKmZPMeR05blY";
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
+const STORAGE_KEY = import.meta.env.VITE_SUPABASE_STORAGE_KEY as string;
 
-const STORAGE_KEY = "sb-idehaaowusoylwtgnndh-auth-token";
+// Guard against misconfiguration at build time
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !STORAGE_KEY) {
+  throw new Error(
+    "Missing required env vars: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, VITE_SUPABASE_STORAGE_KEY"
+  );
+}
 
 let client: ReturnType<typeof createClient> | null = null;
 
@@ -97,11 +102,11 @@ export async function getUserDisplayName(): Promise<string | null> {
 
     const uid = authData?.user?.id;
     if (uid) {
-      const { data: contact } = await supabase
+      const { data: contact } = (await supabase
         .from("contact_info")
         .select("full_name")
         .eq("user_id", uid)
-        .maybeSingle();
+        .maybeSingle()) as any;
 
       if (contact?.full_name?.trim()) {
         return contact.full_name.trim();

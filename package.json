@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "wxt",
     "build": "wxt build && node scripts/postbuild.mjs",
-    "zip": "npm run build && node scripts/zip.mjs",
+    "build:prod": "wxt build && node scripts/postbuild.mjs",
+    "build:local": "wxt build --mode development && node scripts/postbuild.mjs",
+    "zip": "npm run build:prod && node scripts/zip.mjs",
     "compile": "tsc --noEmit",
     "release": "bash scripts/release.sh"
   },

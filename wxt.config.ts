@@ -41,6 +41,28 @@ export default defineConfig({
     },
   },
   hooks: {
+    "build:manifestGenerated": (wxt, manifest) => {
+      // In dev mode (serve or build:development), add localhost permissions
+      const isDevMode = wxt.config.command === "serve" || wxt.config.mode === "development";
+      
+      if (wxt.config.command === "serve") {
+        // In serve mode, remove default_popup so chrome.action.onClicked fires
+        // and the background script can capture page content before opening the popup
+        if (manifest.action) {
+          delete manifest.action.default_popup;
+        }
+      }
+      
+      if (isDevMode) {
+        // Allow localhost for dev auth bridge
+        if (!manifest.host_permissions) {
+          manifest.host_permissions = [];
+        }
+        if (!manifest.host_permissions.includes("http://localhost/*")) {
+          manifest.host_permissions.push("http://localhost/*");
+        }
+      }
+    },
     "build:done": ensureIcons,
   },
 });

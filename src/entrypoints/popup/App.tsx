@@ -100,7 +100,7 @@ function isJobPage(url: string, text: string): boolean {
   return score >= 3;
 }
 
-const PROWRITE_APP_URL = import.meta.env.DEV ? "http://localhost:8080" : "https://my.prowrite.app";
+const PROWRITE_APP_URL = import.meta.env.VITE_APP_URL as string;
 
 function openProWrite(path: string) {
   chrome.tabs.create({ url: `${PROWRITE_APP_URL}${path}` });
@@ -925,6 +925,32 @@ export default function App() {
     runForceExtract(state.url, state.text);
   };
 
+  const runGenerateDocuments = async (job: ExtractedJob, jobId: string) => {
+    setState({ phase: "generating" });
+    try {
+      const docs = await generateDocuments(jobId);
+
+      setState({
+        phase: "done",
+        contentSnapshot: docs?.cv?.contentSnapshot ?? null,
+        stylingSnapshot: docs?.cv?.stylingSnapshot ?? null,
+        coverLetter: docs?.coverLetter,
+        jobUrl: jobId,
+        title: job.job_title,
+        company: job.company,
+      });
+    } catch (e: any) {
+      if (e.message === "subscription_required") {
+        setState({ phase: "error", message: "Your trial has ended. Subscribe to generate documents." });
+      } else {
+        const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
+        const msg = e.message || "Something went wrong";
+        const isRetryable = !statusCode || statusCode >= 500 || statusCode === 429;
+        setState({ phase: "error", message: msg, statusCode, retry: isRetryable ? () => runGenerateDocuments(job, jobId) : undefined });
+      }
+    }
+  };
+
   const runSaveAndGenerate = async (job: ExtractedJob, pageUrl: string) => {
     setState({ phase: "saving" });
     try {
@@ -948,28 +974,12 @@ export default function App() {
         status: "draft",
       });
 
-      setState({ phase: "generating" });
-
-      const docs = await generateDocuments(jobId);
-
-      setState({
-        phase: "done",
-        contentSnapshot: docs?.cv?.contentSnapshot ?? null,
-        stylingSnapshot: docs?.cv?.stylingSnapshot ?? null,
-        coverLetter: docs?.coverLetter,
-        jobUrl: jobId,
-        title: job.job_title,
-        company: job.company,
-      });
+      await runGenerateDocuments(job, jobId);
     } catch (e: any) {
-      if (e.message === "subscription_required") {
-        setState({ phase: "error", message: "Your trial has ended. Subscribe to generate documents." });
-      } else {
-        const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
-        const msg = e.message || "Something went wrong";
-        const isRetryable = !statusCode || statusCode >= 500;
-        setState({ phase: "error", message: msg, statusCode, retry: isRetryable ? () => runSaveAndGenerate(job, pageUrl) : undefined });
-      }
+      const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
+      const msg = e.message || "Something went wrong";
+      const isRetryable = !statusCode || statusCode >= 500;
+      setState({ phase: "error", message: msg, statusCode, retry: isRetryable ? () => runSaveAndGenerate(job, pageUrl) : undefined });
     }
   };
 

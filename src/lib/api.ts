@@ -1,7 +1,9 @@
 import { getAccessToken, getSupabaseClient } from "./auth";
 
-const EXTRACT_FUNCTION = "https://idehaaowusoylwtgnndh.supabase.co/functions/v1/extract-job-details";
-const GENERATE_FUNCTION = "https://idehaaowusoylwtgnndh.supabase.co/functions/v1/generate-documents";
+const SUPABASE_FUNCTIONS_BASE = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1`;
+
+const EXTRACT_FUNCTION = `${SUPABASE_FUNCTIONS_BASE}/extract-job-details`;
+const GENERATE_FUNCTION = `${SUPABASE_FUNCTIONS_BASE}/generate-documents`;
 
 export interface ExtractedJob {
   job_title: string;
@@ -23,16 +25,52 @@ export class AuthFetchError extends Error {
   }
 }
 
-async function authFetch(url: string, body: any) {
+async function getAIKey(): Promise<string | null> {
+  try {
+    const stored = await chrome.storage.local.get<{ aiApiKeys?: Record<string, string> }>(["aiApiKeys"]);
+    if (!stored.aiApiKeys) return null;
+
+    const supabase = getSupabaseClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data: activeProvider } = await supabase
+      .from("ai_provider_settings")
+      .select("provider")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (activeProvider?.provider && stored.aiApiKeys[activeProvider.provider]) {
+      return stored.aiApiKeys[activeProvider.provider];
+    }
+
+    // Fallback: try groq key (most common fallback)
+    return stored.aiApiKeys.groq || null;
+  } catch {
+    return null;
+  }
+}
+
+async function authFetch(url: string, body: any, includeAIKey = false) {
   const token = await getAccessToken();
   if (!token) throw new AuthFetchError("Not authenticated", 401);
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+
+  if (includeAIKey) {
+    const aiKey = await getAIKey();
+    if (aiKey) {
+      headers["x-ai-api-key"] = aiKey;
+    }
+  }
+
   const resp = await fetch(url, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify(body),
   });
 
@@ -92,7 +130,7 @@ export async function generateDocuments(jobId: string) {
     jobApplicationId: jobId,
     generateCv: true,
     generateCoverLetter: true,
-  });
+  }, true);
 
   if (data?.error === "subscription_required") {
     const err = new AuthFetchError("subscription_required", 402);

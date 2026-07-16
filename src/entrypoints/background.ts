@@ -2,6 +2,8 @@ import { defineBackground } from "wxt/sandbox";
 import { setSession, clearSession } from "../lib/auth";
 
 export default defineBackground(() => {
+  let popupWindowId: number | null = null;
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === "auth-update" && message.session) {
       setSession(message.session).then(() => sendResponse({ ok: true }));
@@ -11,6 +13,18 @@ export default defineBackground(() => {
     if (message.type === "clear-auth") {
       clearSession().then(() => sendResponse({ ok: true }));
       return true;
+    }
+
+    if (message.type === "ai-keys-update" && message.aiKeys) {
+      chrome.storage.local.set({ aiApiKeys: message.aiKeys }).then(() => sendResponse({ ok: true }));
+      return true;
+    }
+  });
+
+  // Clean up popupWindowId when the popup window is closed
+  chrome.windows.onRemoved.addListener((windowId) => {
+    if (windowId === popupWindowId) {
+      popupWindowId = null;
     }
   });
 
@@ -42,11 +56,27 @@ export default defineBackground(() => {
       await chrome.storage.local.set({ pendingPageError: "No active tab found" });
     }
 
-    chrome.windows.create({
+    // Close existing popup if one is open
+    if (popupWindowId !== null) {
+      try {
+        await chrome.windows.remove(popupWindowId);
+      } catch {
+        // Window may have already been closed; ignore error
+        popupWindowId = null;
+      }
+    }
+
+    // Open fresh popup window
+    const newWindow = await chrome.windows.create({
       url: chrome.runtime.getURL("popup.html"),
       type: "popup",
       width: 360,
       height: 500,
     });
+
+    // Store the new window ID
+    if (newWindow?.id !== undefined) {
+      popupWindowId = newWindow.id;
+    }
   });
 });

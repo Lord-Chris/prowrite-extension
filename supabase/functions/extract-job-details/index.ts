@@ -143,7 +143,7 @@ serve(async (req) => {
               },
               location: { type: "string", description: "Job location (city, remote, hybrid)" },
               job_description: { type: "string", description: "Full job description text" },
-              salary_range: { type: "string", description: "Salary range if mentioned" },
+              salary_range: { type: "string", description: "Salary range as a human-readable string, e.g. \"$50,000-$70,000\" or \"$45/hr\". Return empty string if not mentioned." },
               employment_type: {
                 type: "string", enum: ["Full-time", "Part-time", "Contract", "Internship", "Temporary", "Other"],
                 description: "Employment type",
@@ -159,10 +159,9 @@ serve(async (req) => {
               },
             },
             required: ["job_title", "company", "key_responsibilities", "required_skills", "years_of_experience_required"],
-            additionalProperties: false,
           },
         },
-      },
+      },  
     ];
     const toolChoice = { type: "function", function: { name: "extracted_job_details" } };
 

@@ -19,6 +19,54 @@ export default defineBackground(() => {
       chrome.storage.local.set({ aiApiKeys: message.aiKeys }).then(() => sendResponse({ ok: true }));
       return true;
     }
+
+    if (message.type === "sync-auth-from-tab") {
+      (async () => {
+        try {
+          const tabs = await chrome.tabs.query({ url: "*://*.prowrite.app/*" });
+          if (tabs.length > 0) {
+            // Send check-auth to the first matching tab's content script
+            await chrome.tabs.sendMessage(tabs[0].id!, { type: "check-auth" });
+            sendResponse({ found: true });
+          } else {
+            sendResponse({ found: false });
+          }
+        } catch (err) {
+          sendResponse({ found: false });
+        }
+      })();
+      return true;
+    }
+
+    if (message.type === "open-prowrite-background-tab") {
+      (async () => {
+        try {
+          const baseUrl = message.url || "https://my.prowrite.app";
+          const extensionId = message.extensionId || "";
+          // Open the /bridge route with the extension ID as a query param
+          const bridgeUrl = `${baseUrl}/bridge?ext=${extensionId}`;
+          const tab = await chrome.tabs.create({ url: bridgeUrl, active: false });
+          sendResponse({ tabId: tab.id });
+        } catch (err) {
+          sendResponse({ tabId: null });
+        }
+      })();
+      return true;
+    }
+
+    if (message.type === "close-tab") {
+      (async () => {
+        try {
+          if (message.tabId) {
+            await chrome.tabs.remove(message.tabId);
+          }
+          sendResponse({ ok: true });
+        } catch (err) {
+          sendResponse({ ok: false });
+        }
+      })();
+      return true;
+    }
   });
 
   // Clean up popupWindowId when the popup window is closed

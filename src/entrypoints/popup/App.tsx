@@ -101,9 +101,15 @@ function isJobPage(url: string, text: string): boolean {
 }
 
 const PROWRITE_APP_URL = import.meta.env.VITE_APP_URL as string;
+const EXTENSION_ID = import.meta.env.VITE_EXTENSION_ID as string;
 
 function openProWrite(path: string) {
-  chrome.tabs.create({ url: `${PROWRITE_APP_URL}${path}` });
+  // If opening the auth page, include the extension ID as a query param
+  // so the auth flow can redirect to /bridge instead of /dashboard after login
+  const url = path === "/auth" 
+    ? `${PROWRITE_APP_URL}${path}?ext=${EXTENSION_ID}`
+    : `${PROWRITE_APP_URL}${path}`;
+  chrome.tabs.create({ url });
 }
 
 function escapeHtml(text: unknown): string {
@@ -854,6 +860,7 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
+    let storageListenerUnsubscribe: (() => void) | null = null;
 
     const runExtract = async (url: string, text: string) => {
       if (cancelled) return;
@@ -871,40 +878,186 @@ export default function App() {
       }
     };
 
+    const STORAGE_KEY = import.meta.env.VITE_SUPABASE_STORAGE_KEY as string;
+
+    const waitForSession = (timeoutMs: number): Promise<boolean> => {
+      return new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve(false), timeoutMs);
+        const listener = (changes: Record<string, chrome.storage.StorageChange>) => {
+          if (STORAGE_KEY in changes) {
+            clearTimeout(timeout);
+            chrome.storage.onChanged.removeListener(listener);
+            resolve(true);
+          }
+        };
+        chrome.storage.onChanged.addListener(listener);
+      });
+    };
+
     const run = async () => {
-      const token = await getAccessToken();
-      if (!token) {
-        if (!cancelled) setState({ phase: "no-auth" });
+      // Step 1: Check local storage (fast path)
+      let token = await getAccessToken();
+      if (token) {
+        if (!cancelled) {
+          getUserDisplayName().then(name => {
+            if (name && !cancelled) setProfileName(name);
+          });
+          setState({ phase: "checking-page" });
+          try {
+            const { url, text } = await getPageContent();
+            if (!isJobPage(url, text)) {
+              if (!cancelled) setState({ phase: "not-job-page", url, text });
+              return;
+            }
+            await runExtract(url, text);
+          } catch (e: any) {
+            if (!cancelled) {
+              const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
+              const msg = e.message || "Failed to extract job details";
+              setState({ phase: "error", message: msg, statusCode });
+            }
+          }
+        }
         return;
       }
 
-      getUserDisplayName().then(name => {
-        if (name && !cancelled) setProfileName(name);
-      });
-
-      if (!cancelled) setState({ phase: "checking-page" });
-
+      // Step 2: Try to sync auth from any open prowrite.app tab
       try {
-        const { url, text } = await getPageContent();
-
-        if (!isJobPage(url, text)) {
-          if (!cancelled) setState({ phase: "not-job-page", url, text });
+        await chrome.runtime.sendMessage({ type: "sync-auth-from-tab" });
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Wait for content script to fire
+        token = await getAccessToken();
+        if (token) {
+          if (!cancelled) {
+            getUserDisplayName().then(name => {
+              if (name && !cancelled) setProfileName(name);
+            });
+            setState({ phase: "checking-page" });
+            try {
+              const { url, text } = await getPageContent();
+              if (!isJobPage(url, text)) {
+                if (!cancelled) setState({ phase: "not-job-page", url, text });
+                return;
+              }
+              await runExtract(url, text);
+            } catch (e: any) {
+              if (!cancelled) {
+                const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
+                const msg = e.message || "Failed to extract job details";
+                setState({ phase: "error", message: msg, statusCode });
+              }
+            }
+          }
           return;
         }
+      } catch {
+        // No open tab or error communicating with background
+      }
 
-        await runExtract(url, text);
-      } catch (e: any) {
-        if (!cancelled) {
-          const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
-          const msg = e.message || "Failed to extract job details";
-          setState({ phase: "error", message: msg, statusCode });
+      // Step 3: Open prowrite.app /bridge as background tab
+      // Use storage.onChanged to detect when the session appears (content script fires)
+      // instead of relying on a fixed timeout
+      let backgroundTabId: number | null = null;
+      try {
+        const response = await chrome.runtime.sendMessage({
+          type: "open-prowrite-background-tab",
+          url: import.meta.env.VITE_APP_URL as string,
+          extensionId: EXTENSION_ID,
+        });
+        backgroundTabId = response?.tabId || null;
+
+        if (backgroundTabId) {
+          // Wait for the session to appear in storage or timeout after 5s
+          const sessionAppeared = await new Promise<boolean>((resolve) => {
+            const timeout = setTimeout(() => resolve(false), 5000);
+            const listener = (changes: Record<string, chrome.storage.StorageChange>) => {
+              if (STORAGE_KEY in changes && changes[STORAGE_KEY].newValue) {
+                clearTimeout(timeout);
+                chrome.storage.onChanged.removeListener(listener);
+                resolve(true);
+              }
+            };
+            chrome.storage.onChanged.addListener(listener);
+          });
+
+          // Always close the background tab regardless of outcome
+          try {
+            await chrome.runtime.sendMessage({ type: "close-tab", tabId: backgroundTabId });
+          } catch {
+            // Ignore errors closing the tab
+          }
+
+          if (sessionAppeared) {
+            token = await getAccessToken();
+            if (token) {
+              if (!cancelled) {
+                getUserDisplayName().then(name => {
+                  if (name && !cancelled) setProfileName(name);
+                });
+                setState({ phase: "checking-page" });
+                try {
+                  const { url, text } = await getPageContent();
+                  if (!isJobPage(url, text)) {
+                    if (!cancelled) setState({ phase: "not-job-page", url, text });
+                    return;
+                  }
+                  await runExtract(url, text);
+                } catch (e: any) {
+                  if (!cancelled) {
+                    const statusCode = e instanceof AuthFetchError ? e.statusCode : undefined;
+                    const msg = e.message || "Failed to extract job details";
+                    setState({ phase: "error", message: msg, statusCode });
+                  }
+                }
+              }
+              return;
+            }
+          }
         }
+      } catch {
+        // Error opening background tab
+        if (backgroundTabId) {
+          try {
+            await chrome.runtime.sendMessage({ type: "close-tab", tabId: backgroundTabId });
+          } catch {
+            // Ignore errors closing the tab
+          }
+        }
+      }
+
+      // Step 4: No session found — show login screen and listen for storage changes
+      if (!cancelled) {
+        setState({ phase: "no-auth" });
+
+        // Register listener for storage changes
+        const STORAGE_KEY = import.meta.env.VITE_SUPABASE_STORAGE_KEY as string;
+        const storageListener = (changes: Record<string, chrome.storage.StorageChange>) => {
+          if (STORAGE_KEY in changes && changes[STORAGE_KEY].newValue) {
+            // Session appeared in storage — automatically proceed
+            if (storageListenerUnsubscribe) {
+              storageListenerUnsubscribe();
+              storageListenerUnsubscribe = null;
+            }
+            if (!cancelled) {
+              run(); // Recursively call run() to proceed with extraction
+            }
+          }
+        };
+
+        chrome.storage.onChanged.addListener(storageListener);
+        storageListenerUnsubscribe = () => {
+          chrome.storage.onChanged.removeListener(storageListener);
+        };
       }
     };
 
     run();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (storageListenerUnsubscribe) {
+        storageListenerUnsubscribe();
+      }
+    };
   }, []);
 
   const runForceExtract = async (url: string, text: string) => {

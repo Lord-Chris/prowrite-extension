@@ -28,7 +28,7 @@ export default defineConfig({
   manifest: {
     name: "ProWrite",
     description: "Save jobs and generate tailored documents from any job board",
-    version: "0.1.1",
+    version: "0.1.2",
     permissions: ["storage", "activeTab", "scripting"],
     host_permissions: ["*://*.prowrite.app/*"],
     icons: {

@@ -4,6 +4,3 @@ dist/
 *.local
 .env.production
 .DS_Store
-
-# Supabase
-supabase/.temp/
